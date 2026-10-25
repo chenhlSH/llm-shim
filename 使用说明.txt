@@ -1,0 +1,73 @@
+auto-compat-zig 0.2.0 — LLM API 兼容屏蔽层网关 + 探针（单二进制，Zig 0.17，三平台）
+（版本号：auto-compat version / --version / -V 直接打印；help/菜单首行也带；0.1.x 规则：升级只递增末位）
+
+Windows:  auto-compat.exe        （先 $env:KEY="..." 设好密钥）
+Linux:    ./linux/auto-compat    （export KEY=... 后运行）
+
+运行（单二进制，两种入口）：
+  直接运行 → 交互菜单：1=网关 2=探针向导 3=帮助 q=退出
+  子命令（脚本/服务用）：
+    auto-compat serve       启动网关（监听 127.0.0.1:8686；配置只走环境变量，不接受额外参数）
+    auto-compat probe --key-env KEY_NAME [--url 裸站点] [--out providers.json]
+                           探针：只给 key 自动找家（命中一个可行端点即停）；
+                           用户 URL 全部试探；裸站点自动发现路径后缀；
+                           闭环验证模型 + 档位嗅探 → 固化 providers.json
+    auto-compat help        用法 + 全部环境变量
+    auto-compat version     只打印版本号（= --version / -V）
+  说明：无参数且非终端（服务/重定向/管道）时直接起网关，与旧版一致；
+        AUTO_COMPAT_MENU=1|0 可强制开/关菜单。
+
+  参数严格解析（0.1.6/0.1.7，"只有一种显而易见写法"）：每个选项只写一次、只有 --opt VALUE
+        一种写法（--opt=VALUE 拒绝并提示正确写法）；重复选项/矛盾组合（--key 与 --key-env 并存、
+        --no-verify 与验证类并存、--verify-models 0）一律拒绝并给出正确指令；未知选项/缺值/空值/
+        非数字/杂散参数 exit 2 并附用法（拼错给 "did you mean" 建议），不触网不写文件；
+        probe --help/--version 只能单独出现；serve 带额外参数会报错并指向环境变量（gateway 别名已移除）；
+        菜单只认 1/2/3/q。无效的数值环境变量（PORT/PLACEHOLDER_MS/IDLE_TIMEOUT_MS/RETRY_DELAY_MS/MENU）
+        启动时点名并给出实际默认值。
+
+  入站 key 直通（0.1.5）：客户端带的 x-api-key / Authorization: Bearer 会透传给上游（环境变量优先；
+        网关令牌不外传；都没有则 MISSING_CREDENTIAL 快失败）。
+
+  上游空闲超时（默认开，600s/次尝试）：上游无数据超时即打断连接 → code=TIMEOUT 由自愈重试；
+        AUTO_COMPAT_IDLE_TIMEOUT_MS=0 关闭；启动日志注明。
+
+  占位保活（默认开，流式）：上游静默 55s 时向客户端发一个伪装的 "…"（防客户端超时断连），
+        发上游前自动剥离；启动日志注明 ON/OFF；AUTO_COMPAT_PLACEHOLDER_MS=0 关闭。
+
+  运行时会自愈：上游原生方言不可用则自动映射翻译；失败自动退避重试（5xx/429/档位被拒）；
+        成功一次即固定路径/方言并写回 providers.json（同名覆盖，可作下次启动预置）。
+        日志可见 "route fixed:" / "mapping via" / "retrying in" 字样。
+        装载期同端点去重：条目与已有供应商（内置优先）端点相同时不注册，
+        启动日志搜 "same endpoint" 可见说明（运行时输出全为 ASCII，不乱码）；
+        裸模型名歧义时 400 会列出候选并给出写法（如 intern-ai/glm-5.3）。
+        方言环（0.1.10）：三个方言互备——任何一条反复失败（5xx/429/超时/404）都沿环试下一条
+        （最多换两次 = 三条都试到；日志 "mapping via ... (2/3 dialects tried)"），客户端仍拿到
+        所需格式；坏记忆 300s 后自动再试；AUTH 等真错误不换。
+        诊断（0.1.16）：每请求带 id（x-request-id 或 #rN）——一行入站摘要、每次上游尝试一行
+        （序号/方言/URL、HTTP 状态/code/耗时/上游错误摘要）、一行终态汇总；解析失败/鉴权/404 留痕。
+        流式 flush（0.1.17）：响应头立即发出，每个 SSE 帧（含占位保活帧）写完立刻推到 socket；
+        此前只排进连接写缓冲，客户端要等响应结束才收到（日志有 injected 但保活实际无效）。
+        TLS 失败（0.1.15）：TlsInitializationFailed = 上游 TLS 握手/证书校验失败（Zig 折叠名），
+        检查网关主机时间与 CA 存储；网关会给出可行动文案并重试/换方言。
+        日志（0.1.14）：每个请求一行汇总（OK/FAILED code=… attempts=… switches=… 耗时），
+        换方言行写明 failed/unavailable 与 budget spent，客户端 turn 失败可直接对照。
+        网关令牌（0.1.13）：Authorization 与 x-api-key 两种载体都认（Anthropic 客户端只发 x-api-key）。
+        Responses 事件（0.1.12）：所有事件带严格客户端需要的字段（created_at / item.id / item_id /
+        content_index / summary_index / 工具 done status），否则会被逐条丢弃导致"空回答"。
+        系统提示归一（0.1.11）：chat 入站的 system 消息 / responses 入站的 instructions 统一转成
+        上游的 request.system（此前只有 anthropic 入站会带；另两个入站的系统提示会被丢掉）。
+        失败信号（0.1.8）：重试耗尽后——chat 流发 error 帧 + [DONE]；responses 流发规范
+        response.failed（完整对象：id/status=failed/error{code,message}）；非流式 502 走标准
+        错误信封（顶层 error.message/type/code）；anthropic 发标准 error 事件。
+
+网关路由（任意 /vN 前缀均容忍）：
+  POST /chat/completions (OpenAI) | POST /responses (Responses)
+  POST /messages (Anthropic) | GET /models | /providers | /（自描述）
+
+providers.json 条目（baseURL 允许裸站点，启动时自动发现路径并拉目录）：
+  [ { "name": "ds-resp", "baseURL": "https://discovery-api.intern-ai.org.cn/v1",
+      "protocol": "responses", "apiKeyEnv": "INTERN_AI_API_KEY" } ]
+
+环境变量：AUTO_COMPAT_GATEWAY_HOST/PORT、AUTO_COMPAT_GATEWAY_TOKEN、
+          AUTO_COMPAT_PROVIDERS_FILE、AUTO_COMPAT_MENU、各供应商 <apiKeyEnv>
+0.1.4 改名提示：项目/二进制 dsh-compat(-zig) -> auto-compat(-zig)；环境变量 DSH_* -> AUTO_COMPAT_*
