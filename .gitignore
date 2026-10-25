@@ -2,3 +2,4 @@
 zig-out/
 providers.json
 *.log
+__pycache__/
