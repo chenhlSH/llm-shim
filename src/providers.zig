@@ -216,7 +216,7 @@ fn endpointOwner(registry: *const Registry, name: []const u8, base_url: []const 
 /// 保持 ASCII（Windows 传统代码页下中文日志会乱码，与菜单文本同一纪律）。
 fn logEndpointDuplicate(entry_name: []const u8, owner: *const Profile, base_url: []const u8) void {
     std.debug.print(
-        "[auto-compat-zig] providers.json: entry \"{s}\" resolves to the same endpoint as {s} \"{s}\" ({s}) -- same endpoint = same provider; keeping \"{s}\", ignoring the entry (its apiKeyEnv/verifiedModels/effortAccepted will NOT apply). Use a different baseURL for an independent provider.\n",
+        "[llm-shim] providers.json: entry \"{s}\" resolves to the same endpoint as {s} \"{s}\" ({s}) -- same endpoint = same provider; keeping \"{s}\", ignoring the entry (its apiKeyEnv/verifiedModels/effortAccepted will NOT apply). Use a different baseURL for an independent provider.\n",
         .{ entry_name, if (owner.builtin) "built-in" else "earlier-registered", owner.name, base_url, owner.name },
     );
 }
@@ -243,7 +243,7 @@ pub fn loadRegistryWith(allocator: std.mem.Allocator, io: std.Io, path_override:
     defer allocator.free(text);
 
     const parsed = std.json.parseFromSliceLeaky(std.json.Value, allocator, text, .{}) catch {
-        std.debug.print("[auto-compat-zig] providers.json parse failed, ignoring custom entries\n", .{});
+        std.debug.print("[llm-shim] providers.json parse failed, ignoring custom entries\n", .{});
         return registry;
     };
     const root = switch (parsed) {
@@ -316,7 +316,7 @@ pub fn loadRegistryWith(allocator: std.mem.Allocator, io: std.Io, path_override:
         var models: std.ArrayList(Model) = .empty;
         var detection_ok = false;
         // 探测可能耗时（不可达端点要扫候选后缀、每次间隔 300ms 节流）：先点名，避免启动期静默像卡死。
-        std.debug.print("[auto-compat-zig] providers: entry \"{s}\": resolving {s} (path discovery; an unreachable endpoint can take ~10s)\n", .{ name, base_url });
+        std.debug.print("[llm-shim] providers: entry \"{s}\": resolving {s} (path discovery; an unreachable endpoint can take ~10s)\n", .{ name, base_url });
         if (probe_mod.resolveApiBase(allocator, &client, base_url, env.get(api_key_env))) |resolved| {
             if (resolved) |base| {
                 // 复核：裸站点解析出的端点若与已注册供应商相同，同样收敛（早判短路失败时的兜底）。

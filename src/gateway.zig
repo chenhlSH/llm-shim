@@ -46,7 +46,7 @@ pub fn handleConnection(
 
         var request = server.receiveHead() catch break;
         handle(arena, io, &request, registry, config, route_cache) catch |err| {
-            std.debug.print("[auto-compat-zig] request failed: {s}\n", .{@errorName(err)});
+            std.debug.print("[llm-shim] request failed: {s}\n", .{@errorName(err)});
             // 兜底：必须回写响应，否则客户端连接挂起
             const message = std.fmt.allocPrint(arena, "{{\"error\":{{\"message\":\"internal: {s}\",\"type\":\"gateway_error\",\"code\":\"GATEWAY_FAILURE\"}}}}", .{@errorName(err)}) catch null;
             if (message) |body| {
@@ -232,8 +232,8 @@ fn respondSelfDescription(arena: std.mem.Allocator, request: *std.http.Server.Re
     };
     if (accepts_html) {
         const html =
-            "<!doctype html><html lang=\"zh\"><head><meta charset=\"utf-8\"><title>auto-compat-zig</title></head>" ++
-            "<body><h1>auto-compat-zig 网关</h1><p>任意 /vN 前缀被剥除后匹配同一张路由表。</p>" ++
+            "<!doctype html><html lang=\"zh\"><head><meta charset=\"utf-8\"><title>llm-shim</title></head>" ++
+            "<body><h1>llm-shim 网关</h1><p>任意 /vN 前缀被剥除后匹配同一张路由表。</p>" ++
             "<ul><li>POST /chat/completions — OpenAI Chat</li><li>POST /responses — OpenAI Responses</li>" ++
             "<li>POST /messages — Anthropic Messages</li><li>GET /models — 模型目录</li><li>GET /providers — 供应商视图</li></ul>" ++
             "<p>上游空闲超时 {d}ms / 占位保活 {d}ms（均可用环境变量调，0=关）；JSON 自描述：<code>curl http://HOST:PORT/</code></p></body></html>";
@@ -245,7 +245,7 @@ fn respondSelfDescription(arena: std.mem.Allocator, request: *std.http.Server.Re
     var stringify: std.json.Stringify = .{ .writer = &out.writer };
     try stringify.beginObject();
     try stringify.objectField("service");
-    try stringify.write("auto-compat-zig gateway");
+    try stringify.write("llm-shim gateway");
     try stringify.objectField("version");
     try stringify.write(version.value);
     try stringify.objectField("note");
@@ -355,7 +355,7 @@ fn respondModels(arena: std.mem.Allocator, request: *std.http.Server.Request, re
         try stringify.objectField("object");
         try stringify.write("model");
         try stringify.objectField("owned_by");
-        try stringify.write("auto-compat-zig");
+        try stringify.write("llm-shim");
         try stringify.endObject();
     }
     try stringify.endArray();
@@ -563,7 +563,7 @@ fn handleOpenAi(
         _ = router_mod.callHealed(arena, io, route_cache, registry.find(parsed.request.provider).?, .openai, parsed.request, &failure, {}, onChunkForward, &frames_sent) catch |err| {
             finished_flag.store(true, .release);
             if (failure) |failure_value| {
-                const message = try std.fmt.allocPrint(arena, "{s}: HTTP {d} {s}", .{ "auto-compat-zig", failure_value.status, failure_value.message });
+                const message = try std.fmt.allocPrint(arena, "{s}: HTTP {d} {s}", .{ "llm-shim", failure_value.status, failure_value.message });
                 return respondJsonError(request, .bad_gateway, message, failure_value.code);
             }
             return respondJsonError(request, .bad_gateway, @errorName(err), "GATEWAY_FAILURE");

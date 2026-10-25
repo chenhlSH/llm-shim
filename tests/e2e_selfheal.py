@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""auto-compat-zig 运行时自愈 e2e：本地假上游 + 真网关进程，19 个确定性场景。
+"""llm-shim 运行时自愈 e2e：本地假上游 + 真网关进程，19 个确定性场景。
 
 场景：
   1. path-only       裸站点，正确后缀 /api/v1（启动时上游不可达 → 运行时发现）
@@ -54,7 +54,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 HERE = os.path.dirname(os.path.abspath(__file__))
 # 用法：zig build -Doptimize=ReleaseSafe --prefix zig-out/linux && python3 tests/e2e_selfheal.py
 # 可用 AUTO_COMPAT_BIN 覆盖被测二进制路径。
-BIN = os.environ.get("AUTO_COMPAT_BIN", os.path.join(HERE, "..", "zig-out", "linux", "bin", "auto-compat"))
+BIN = os.environ.get("AUTO_COMPAT_BIN", os.path.join(HERE, "..", "zig-out", "linux", "bin", "llm-shim"))
 KEY = "fake-key-123"
 
 STATE = {
@@ -412,12 +412,12 @@ def main():
     # ---------------- 版本号可见性（用户辨别新旧二进制的唯一入口） ----------------
     help_run = subprocess.run([BIN, "help"], capture_output=True, text=True, timeout=30)
     check("help 输出版本号（0.x）",
-          re.search(r"auto-compat 0\.\d+\.\d+", help_run.stdout or "") is not None,
+          re.search(r"llm-shim 0\.\d+\.\d+", help_run.stdout or "") is not None,
           f"stdout_head={(help_run.stdout or '')[:120]}")
     version_run = subprocess.run([BIN, "--version"], capture_output=True, text=True, timeout=30)
     check("--version 干净输出且 exit 0",
           version_run.returncode == 0
-          and re.fullmatch(r"auto-compat 0\.\d+\.\d+\n?", version_run.stdout or "") is not None
+          and re.fullmatch(r"llm-shim 0\.\d+\.\d+\n?", version_run.stdout or "") is not None
           and (version_run.stderr or "") == "",
           f"rc={version_run.returncode} out={version_run.stdout!r} err={version_run.stderr!r}")
 
@@ -1070,14 +1070,14 @@ def main():
         # (c) help/version 只接受单独出现：带其它参数 = 冗余写法，拒绝并给出正确指令
         r = run_cli(["probe", "--help"])
         check("probe --help（单独）→ 用法 + exit 0",
-              r.returncode == 0 and "usage: auto-compat probe" in r.stdout, f"rc={r.returncode} out={r.stdout[:160]}")
+              r.returncode == 0 and "usage: llm-shim probe" in r.stdout, f"rc={r.returncode} out={r.stdout[:160]}")
         r = run_cli(["probe", "--version"])
         check("probe --version（单独）→ 版本 + exit 0",
-              r.returncode == 0 and re.fullmatch(r"auto-compat 0\.\d+\.\d+\n?", r.stdout or "") is not None,
+              r.returncode == 0 and re.fullmatch(r"llm-shim 0\.\d+\.\d+\n?", r.stdout or "") is not None,
               f"rc={r.returncode} out={r.stdout[:120]!r}")
         r = run_cli(["probe", "--out", "x.json", "--help"])
         check("probe --out x --help → exit 2 + 'takes no other arguments' + 正确指令",
-              r.returncode == 2 and "takes no other arguments" in r.stderr and "auto-compat probe --help" in r.stderr,
+              r.returncode == 2 and "takes no other arguments" in r.stderr and "llm-shim probe --help" in r.stderr,
               f"rc={r.returncode} err={r.stderr[:200]}")
         r = run_cli(["probe", "--key", "sk-x", "--out", "x.json", "--version"])
         check("probe --key sk --version → exit 2（不再顺便打印版本）",
@@ -1160,9 +1160,9 @@ def main():
         check("未知子命令 -v → exit 2 + 'did you mean -V?'",
               r.returncode == 2 and "did you mean -V?" in r.stderr, f"rc={r.returncode} err={r.stderr[:200]}")
         r = run_cli(["help", "probe"], timeout=20)
-        check("help probe → exit 2 + 指向 auto-compat probe --help",
+        check("help probe → exit 2 + 指向 llm-shim probe --help",
               r.returncode == 2 and "unexpected argument: probe" in r.stderr
-              and "auto-compat probe --help" in r.stderr, f"rc={r.returncode} err={r.stderr[:200]}")
+              and "llm-shim probe --help" in r.stderr, f"rc={r.returncode} err={r.stderr[:200]}")
         r = run_cli(["version", "--json"], timeout=20)
         check("version --json → exit 2（help/version 不带参数）",
               r.returncode == 2 and "unexpected argument: --json" in r.stderr, f"rc={r.returncode} err={r.stderr[:200]}")

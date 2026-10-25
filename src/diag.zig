@@ -37,12 +37,12 @@ pub fn id() []const u8 {
     return current orelse "-";
 }
 
-/// 统一前缀：`[auto-compat-zig] #<id> ...`；无请求上下文（后台线程）时退化为原前缀。
+/// 统一前缀：`[llm-shim] #<id> ...`；无请求上下文（后台线程）时退化为原前缀。
 pub fn print(comptime fmt: []const u8, args: anytype) void {
     if (current) |request_id| {
-        std.debug.print("[auto-compat-zig] #{s} " ++ fmt, .{request_id} ++ args);
+        std.debug.print("[llm-shim] #{s} " ++ fmt, .{request_id} ++ args);
     } else {
-        std.debug.print("[auto-compat-zig] " ++ fmt, args);
+        std.debug.print("[llm-shim] " ++ fmt, args);
     }
 }
 

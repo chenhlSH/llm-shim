@@ -1,5 +1,5 @@
 //! 闭环探针 CLI：key/URL 进 → 验证结果 + 固化 providers.json 出。
-//! 作为单二进制 auto-compat 的 `probe` 模式运行，或由菜单向导（interactive）驱动。
+//! 作为单二进制 llm-shim 的 `probe` 模式运行，或由菜单向导（interactive）驱动。
 //!
 //! 参数解析是严格的（用户裁决：**只有一种显而易见写法；显式优于隐式**）：
 //! - 每个选项只有一种写法：`--opt VALUE`（`--opt=VALUE` 一律拒绝并提示正确写法）；
@@ -78,7 +78,7 @@ const help_tokens = [_][]const u8{ "-h", "--help" };
 const version_tokens = [_][]const u8{ "-V", "--version" };
 
 const probe_usage = std.fmt.comptimePrint(
-    \\usage: auto-compat probe [options]  (auto-compat {s})
+    \\usage: llm-shim probe [options]  (llm-shim {s})
     \\
     \\  --key-env NAME     read the API key from environment variable NAME
     \\  --key VALUE        inline API key
@@ -239,7 +239,7 @@ fn containsToken(tokens: []const []const u8, value: []const u8) bool {
     return false;
 }
 
-/// `auto-compat probe [opts]` 入口：坏参数/无 key exit 2，无匹配 exit 1。
+/// `llm-shim probe [opts]` 入口：坏参数/无 key exit 2，无匹配 exit 1。
 pub fn run(init: std.process.Init, args: []const []const u8) !void {
     switch (try parseArgs(init.arena.allocator(), args)) {
         .help => try printUsage(init, std.Io.File.stdout()),
@@ -282,7 +282,7 @@ fn reportArgError(init: std.process.Init, arg_error: ArgError) !void {
         .conflicting_options => try out.print("probe: {s} and {s} contradict; keep one\n", .{ arg_error.option, arg_error.arg }),
         .both_key_sources => try out.print("probe: --key and --key-env both given; keep one (--key VALUE inline, --key-env NAME environment variable)\n", .{}),
         .zero_count => try out.print("probe: --verify-models must be at least 1; to skip model verification use --no-verify\n", .{}),
-        .info_with_arguments => try out.print("probe: {s} takes no other arguments (found: {s}); run: auto-compat probe {s}\n", .{
+        .info_with_arguments => try out.print("probe: {s} takes no other arguments (found: {s}); run: llm-shim probe {s}\n", .{
             arg_error.option, arg_error.arg, arg_error.option,
         }),
     }
@@ -390,7 +390,7 @@ pub fn equivalentCommand(allocator: std.mem.Allocator, opts: Options) ![]const u
     else
         "";
     const paid_part = if (opts.verify_paid) " --verify-paid" else "";
-    return std.fmt.allocPrint(allocator, "auto-compat probe {s}{s} --out {s} --verify-models {d}{s}", .{
+    return std.fmt.allocPrint(allocator, "llm-shim probe {s}{s} --out {s} --verify-models {d}{s}", .{
         key_part,
         url_part,
         opts.out_path,
@@ -721,7 +721,7 @@ test "equivalentCommand: 与向导实际选项一致（含 --verify-paid）" {
 
     var opts: Options = .{ .inline_key = "sk-1", .out_path = "out.json", .verify_models = 3 };
     const plain = try equivalentCommand(arena, opts);
-    try std.testing.expectEqualStrings("auto-compat probe --key <inline> --out out.json --verify-models 3", plain);
+    try std.testing.expectEqualStrings("llm-shim probe --key <inline> --out out.json --verify-models 3", plain);
 
     opts.verify_paid = true;
     const paid = try equivalentCommand(arena, opts);

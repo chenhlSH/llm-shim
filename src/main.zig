@@ -1,4 +1,4 @@
-//! auto-compat-zig：LLM API 兼容屏蔽层网关 + 闭环探针（单二进制）。
+//! llm-shim：LLM API 兼容屏蔽层网关 + 闭环探针（单二进制）。
 //!
 //! 模式分发：无参数 + TTY → 交互菜单；无参数 + 非 TTY → 网关（服务/重定向零破坏）；
 //! `serve` → 网关；`probe [opts]` → 探针 CLI；`help` → 用法。
@@ -21,14 +21,14 @@ const Mode = enum { menu, gateway, probe, help, version, invalid };
 const command_tokens = [_][]const u8{ "serve", "probe", "help", "version", "-h", "--help", "-V", "--version" };
 
 const usage_text = std.fmt.comptimePrint(
-    \\auto-compat {s} - LLM API compat gateway + probe (single binary)
+    \\llm-shim {s} - LLM API compat gateway + probe (single binary)
     \\
     \\usage:
-    \\  auto-compat                 interactive menu on a TTY, else gateway
-    \\  auto-compat serve           run the gateway (no menu; config via env vars below)
-    \\  auto-compat probe [opts]    verify an API key and freeze providers.json
-    \\  auto-compat help            show this help
-    \\  auto-compat version         print the version (also -V / --version)
+    \\  llm-shim                 interactive menu on a TTY, else gateway
+    \\  llm-shim serve           run the gateway (no menu; config via env vars below)
+    \\  llm-shim probe [opts]    verify an API key and freeze providers.json
+    \\  llm-shim help            show this help
+    \\  llm-shim version         print the version (also -V / --version)
     \\
     \\gateway environment:
     \\  AUTO_COMPAT_GATEWAY_HOST             listen host (default 127.0.0.1)
@@ -52,7 +52,7 @@ const usage_text = std.fmt.comptimePrint(
 
 const menu_text = std.fmt.comptimePrint(
     \\
-    \\auto-compat {s} - LLM API compat gateway + probe (single binary)
+    \\llm-shim {s} - LLM API compat gateway + probe (single binary)
     \\
     \\  1) gateway  listen on 127.0.0.1:8686 (OpenAI/Responses/Anthropic)
     \\  2) probe    verify an API key -> freeze providers.json
@@ -96,9 +96,9 @@ fn reportInfoExtra(init: std.process.Init, verb: []const u8, extra: []const u8) 
 
 /// 多余参数对应的"正确指令"（纯函数，便于单测）。
 fn infoExtraHint(extra: []const u8) []const u8 {
-    if (std.mem.eql(u8, extra, "probe")) return "to see probe options run: auto-compat probe --help";
-    if (std.mem.eql(u8, extra, "serve")) return "to see gateway options run: auto-compat serve --help";
-    return "help and version take no arguments; run: auto-compat help";
+    if (std.mem.eql(u8, extra, "probe")) return "to see probe options run: llm-shim probe --help";
+    if (std.mem.eql(u8, extra, "serve")) return "to see gateway options run: llm-shim serve --help";
+    return "help and version take no arguments; run: llm-shim help";
 }
 
 /// 未知子命令：点名 token + 正确指令（原别名/近似建议）+ 用法（stderr），exit 2。
@@ -106,12 +106,12 @@ fn reportUnknownCommand(init: std.process.Init, token: []const u8) !void {
     var buffer: [512]u8 = undefined;
     var writer = std.Io.File.stderr().writer(init.io, &buffer);
     const out = &writer.interface;
-    try out.print("auto-compat {s}: unknown command: {s}\n", .{ version.value, token });
+    try out.print("llm-shim {s}: unknown command: {s}\n", .{ version.value, token });
     if (std.mem.eql(u8, token, "gateway")) {
         // 曾经的别名：无别名，只有一种写法。
-        try out.writeAll("auto-compat: use `serve` (no aliases): auto-compat serve\n");
+        try out.writeAll("llm-shim: use `serve` (no aliases): llm-shim serve\n");
     } else if (cli_match.suggestAmong(&command_tokens, token)) |suggestion| {
-        try out.print("auto-compat {s}: did you mean {s}?\n", .{ version.value, suggestion });
+        try out.print("llm-shim {s}: did you mean {s}?\n", .{ version.value, suggestion });
     }
     try out.writeAll("\n");
     try writer.flush();
@@ -143,7 +143,7 @@ fn serveMode(init: std.process.Init, args: []const []const u8) !void {
             var writer = std.Io.File.stderr().writer(init.io, &buffer);
             const out = &writer.interface;
             try out.print("{s}: unexpected argument: {s}\n", .{ if (args.len > 0) args[0] else "serve", token });
-            try out.writeAll("gateway settings come from environment variables (AUTO_COMPAT_GATEWAY_HOST, AUTO_COMPAT_GATEWAY_PORT, AUTO_COMPAT_GATEWAY_TOKEN, AUTO_COMPAT_PROVIDERS_FILE; see: auto-compat help)\n");
+            try out.writeAll("gateway settings come from environment variables (AUTO_COMPAT_GATEWAY_HOST, AUTO_COMPAT_GATEWAY_PORT, AUTO_COMPAT_GATEWAY_TOKEN, AUTO_COMPAT_PROVIDERS_FILE; see: llm-shim help)\n");
             try writer.flush();
             std.process.exit(2);
         },
@@ -169,7 +169,7 @@ fn menuEnabled(init: std.process.Init) bool {
         // 非 1/0 的值此前被静默忽略：用户以为菜单被强制开关，实际走了 TTY 探测。
         var buffer: [256]u8 = undefined;
         var writer = std.Io.File.stderr().writer(init.io, &buffer);
-        writer.interface.print("[auto-compat-zig] ignoring invalid AUTO_COMPAT_MENU=\"{s}\" (use 1 or 0); falling back to TTY detection\n", .{value}) catch {};
+        writer.interface.print("[llm-shim] ignoring invalid AUTO_COMPAT_MENU=\"{s}\" (use 1 or 0); falling back to TTY detection\n", .{value}) catch {};
         writer.flush() catch {};
     }
     const stdin_tty = std.Io.File.stdin().isTty(init.io) catch false;
@@ -235,7 +235,7 @@ fn runGateway() !void {
     };
 
     var registry = providers_mod.loadRegistry(allocator, io) catch |err| blk: {
-        std.debug.print("[auto-compat-zig] providers load failed ({s}), built-in providers only\n", .{@errorName(err)});
+        std.debug.print("[llm-shim] providers load failed ({s}), built-in providers only\n", .{@errorName(err)});
         break :blk try providers_mod.builtinRegistry(allocator);
     };
     defer registry.deinit();
@@ -245,29 +245,29 @@ fn runGateway() !void {
     const address = std.Io.net.IpAddress.parseIp4(config.host, config.port) catch {
         var buffer: [512]u8 = undefined;
         var writer = std.Io.File.stderr().writer(io, &buffer);
-        writer.interface.print("auto-compat-zig: invalid AUTO_COMPAT_GATEWAY_HOST=\"{s}\" (need a literal IPv4 address like 127.0.0.1; see: auto-compat help)\n", .{config.host}) catch {};
+        writer.interface.print("llm-shim: invalid AUTO_COMPAT_GATEWAY_HOST=\"{s}\" (need a literal IPv4 address like 127.0.0.1; see: llm-shim help)\n", .{config.host}) catch {};
         writer.flush() catch {};
         std.process.exit(2);
     };
     var listener = try address.listen(io, .{ .reuse_address = true });
     defer listener.deinit(io);
 
-    std.debug.print("[auto-compat-zig] auto-compat {s} gateway listening on http://{s}:{d}/\n", .{ version.value, config.host, config.port });
+    std.debug.print("[llm-shim] llm-shim {s} gateway listening on http://{s}:{d}/\n", .{ version.value, config.host, config.port });
     const idle_timeout_ms = watchdog_mod.idleTimeoutMs();
     // 占位保活：CLI 启动默认开启（阈值 55s），此处注明状态（关闭方式也写清楚）。
     if (placeholder_mod.enabled()) {
-        std.debug.print("[auto-compat-zig] placeholder keepalive: ON (threshold {d}ms, streaming only; injects a disguised \"...\" during upstream silence, stripped before upstream; AUTO_COMPAT_PLACEHOLDER_MS=0 disables)\n", .{placeholder_mod.thresholdMs()});
+        std.debug.print("[llm-shim] placeholder keepalive: ON (threshold {d}ms, streaming only; injects a disguised \"...\" during upstream silence, stripped before upstream; AUTO_COMPAT_PLACEHOLDER_MS=0 disables)\n", .{placeholder_mod.thresholdMs()});
     } else {
-        std.debug.print("[auto-compat-zig] placeholder keepalive: OFF (AUTO_COMPAT_PLACEHOLDER_MS=0)\n", .{});
+        std.debug.print("[llm-shim] placeholder keepalive: OFF (AUTO_COMPAT_PLACEHOLDER_MS=0)\n", .{});
     }
     if (idle_timeout_ms > 0) {
-        std.debug.print("[auto-compat-zig] upstream idle timeout: ON ({d}ms per attempt, retried by self-heal; AUTO_COMPAT_IDLE_TIMEOUT_MS=0 disables)\n", .{idle_timeout_ms});
+        std.debug.print("[llm-shim] upstream idle timeout: ON ({d}ms per attempt, retried by self-heal; AUTO_COMPAT_IDLE_TIMEOUT_MS=0 disables)\n", .{idle_timeout_ms});
     } else {
-        std.debug.print("[auto-compat-zig] upstream idle timeout: OFF (AUTO_COMPAT_IDLE_TIMEOUT_MS=0)\n", .{});
+        std.debug.print("[llm-shim] upstream idle timeout: OFF (AUTO_COMPAT_IDLE_TIMEOUT_MS=0)\n", .{});
     }
     watchdog_mod.start(allocator, io);
-    std.debug.print("[auto-compat-zig] routes: POST /chat/completions | POST /responses | POST /messages | GET /models | GET /providers\n", .{});
-    std.debug.print("[auto-compat-zig] providers: ", .{});
+    std.debug.print("[llm-shim] routes: POST /chat/completions | POST /responses | POST /messages | GET /models | GET /providers\n", .{});
+    std.debug.print("[llm-shim] providers: ", .{});
     for (registry.profiles.items, 0..) |*profile, index| {
         std.debug.print("{s}{s}", .{ if (index > 0) ", " else "", profile.name });
     }
@@ -281,7 +281,7 @@ fn runGateway() !void {
     if (std.Thread.spawn(.{}, router_mod.prewarm, .{ &route_cache, &registry, io })) |prewarm_thread| {
         prewarm_thread.detach();
     } else |err| {
-        std.debug.print("[auto-compat-zig] prewarm thread failed to start ({s}), skipped\n", .{@errorName(err)});
+        std.debug.print("[llm-shim] prewarm thread failed to start ({s}), skipped\n", .{@errorName(err)});
     }
 
     while (true) {
@@ -313,12 +313,12 @@ fn invalidEnvNote(buffer: []u8, name: []const u8, raw: ?[]const u8, default_valu
     const value = switch (env.parseInt(raw)) {
         .absent => return null,
         .value => |parsed| parsed,
-        .invalid => return std.fmt.bufPrint(buffer, "[auto-compat-zig] ignoring invalid {s}=\"{s}\" (need a non-negative integer); using default {d}\n", .{
+        .invalid => return std.fmt.bufPrint(buffer, "[llm-shim] ignoring invalid {s}=\"{s}\" (need a non-negative integer); using default {d}\n", .{
             name, raw orelse "", default_value,
         }) catch null,
     };
     if (policy == .port and (value == 0 or value > std.math.maxInt(u16))) {
-        return std.fmt.bufPrint(buffer, "[auto-compat-zig] ignoring unusable {s}={d} (port must be 1..65535); using default {d}\n", .{ name, value, default_value }) catch null;
+        return std.fmt.bufPrint(buffer, "[llm-shim] ignoring unusable {s}={d} (port must be 1..65535); using default {d}\n", .{ name, value, default_value }) catch null;
     }
     return null;
 }
@@ -381,9 +381,9 @@ test "未知子命令的近似建议表" {
 }
 
 test "infoExtraHint: 多余参数指向正确指令" {
-    try std.testing.expectEqualStrings("to see probe options run: auto-compat probe --help", infoExtraHint("probe"));
-    try std.testing.expectEqualStrings("to see gateway options run: auto-compat serve --help", infoExtraHint("serve"));
-    try std.testing.expect(std.mem.indexOf(u8, infoExtraHint("--json"), "auto-compat help") != null);
+    try std.testing.expectEqualStrings("to see probe options run: llm-shim probe --help", infoExtraHint("probe"));
+    try std.testing.expectEqualStrings("to see gateway options run: llm-shim serve --help", infoExtraHint("serve"));
+    try std.testing.expect(std.mem.indexOf(u8, infoExtraHint("--json"), "llm-shim help") != null);
 }
 
 test "serveDecision: 空前缀/裸 serve 进网关；help 任意位置；额外参数被点名" {

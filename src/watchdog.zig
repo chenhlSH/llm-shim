@@ -114,7 +114,7 @@ pub fn start(allocator: std.mem.Allocator, io: std.Io) void {
     if (!placeholder_mod.enabled()) return;
     const threshold = placeholder_mod.thresholdMs();
     const thread = std.Thread.spawn(.{}, loop, .{ io, threshold }) catch |err| {
-        std.debug.print("[auto-compat-zig] watchdog thread failed to start ({s}); placeholder keepalive disabled\n", .{@errorName(err)});
+        std.debug.print("[llm-shim] watchdog thread failed to start ({s}); placeholder keepalive disabled\n", .{@errorName(err)});
         return;
     };
     started = true;
@@ -158,7 +158,7 @@ fn interruptUpstream(entry: *Entry, silent_ms: i64) void {
     };
     entry.timed_out.store(true, .release);
     shutdownHandle(handle);
-    std.debug.print("[auto-compat-zig] upstream idle timeout: silent for {d}ms (limit {d}ms), interrupting the blocked read (code=TIMEOUT)\n", .{ silent_ms, entry.idle_timeout_ms });
+    std.debug.print("[llm-shim] upstream idle timeout: silent for {d}ms (limit {d}ms), interrupting the blocked read (code=TIMEOUT)\n", .{ silent_ms, entry.idle_timeout_ms });
 }
 
 /// shutdown 的跨平台 how 常量（Linux=SHUT_RDWR=2，Windows=SD_BOTH=2）。
@@ -217,7 +217,7 @@ fn emitPlaceholder(entry: *Entry, now: i64, last: i64) void {
     };
     entry.placeholder_sent.* = true;
     entry.last_write_ms.store(now, .release);
-    std.debug.print("[auto-compat-zig] placeholder keepalive: injected after {d}ms of upstream silence (streaming only; AUTO_COMPAT_PLACEHOLDER_MS=0 disables)\n", .{now - last});
+    std.debug.print("[llm-shim] placeholder keepalive: injected after {d}ms of upstream silence (streaming only; AUTO_COMPAT_PLACEHOLDER_MS=0 disables)\n", .{now - last});
 }
 
 /// 注册/注销（未启用时为空操作；成对调用）。

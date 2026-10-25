@@ -595,7 +595,7 @@ pub fn callStreaming(
         return error.MissingCredential;
     }
     if (resolved_key.from_client) {
-        std.debug.print("[auto-compat-zig] {s}: forwarding the inbound client API key upstream ({s} unset)\n", .{ profile.name, profile.api_key_env });
+        std.debug.print("[llm-shim] {s}: forwarding the inbound client API key upstream ({s} unset)\n", .{ profile.name, profile.api_key_env });
     }
     const body = try serializeBody(arena, profile, request);
     const url = try std.fmt.allocPrint(arena, "{s}/messages", .{std.mem.trimEnd(u8, profile.base_url, "/")});
@@ -639,7 +639,7 @@ pub fn callStreaming(
 
     var transfer_buffer: [16384]u8 = undefined;
     const body_reader = response.reader(&transfer_buffer);
-    var translator = Translator.init(arena, "auto-compat-zig");
+    var translator = Translator.init(arena, "llm-shim");
     defer translator.deinit();
 
     while (true) {

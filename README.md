@@ -1,4 +1,4 @@
-# auto-compat-zig
+# llm-shim
 
 A local LLM API compatibility gateway + connectivity probe in a **single binary** (Zig 0.17, standard library only, zero third-party dependencies).
 
@@ -8,7 +8,7 @@ A local LLM API compatibility gateway + connectivity probe in a **single binary*
 
 Client SDKs speak three dialects — OpenAI Chat Completions, OpenAI Responses, Anthropic Messages.
 Upstream vendors support arbitrary subsets of them, and each vendor has its own quirks
-(reasoning-effort flags, error envelopes, rate limits, missing routes). `auto-compat` sits on
+(reasoning-effort flags, error envelopes, rate limits, missing routes). `llm-shim` sits on
 `127.0.0.1:8686`, accepts any of the three dialects, and makes them work:
 
 - **Three-dialect fallback ring** — if the dialect your client demands keeps failing upstream
@@ -24,7 +24,7 @@ Upstream vendors support arbitrary subsets of them, and each vendor has its own 
   upstream prefix caches stay warm).
 - **600s upstream idle timeout** — black-holed upstreams fail bounded with `code=TIMEOUT`
   instead of hanging forever.
-- **Connectivity probe** (`auto-compat probe`) — verifies API keys, discovers the correct
+- **Connectivity probe** (`llm-shim probe`) — verifies API keys, discovers the correct
   endpoint path, and writes a ready-to-use `providers.json`.
 - **Strict CLI** — one obvious spelling per option; unknown/misspelled/redundant/conflicting
   arguments are rejected with the correct command printed (no silent fallbacks).
@@ -35,20 +35,20 @@ Upstream vendors support arbitrary subsets of them, and each vendor has its own 
 
 ```sh
 # 1. get a binary (or build, see below)
-unzip auto-compat-zig-<version>-多平台.zip   # linux/ windows/ macos/
+unzip llm-shim-<version>-多平台.zip   # linux/ windows/ macos/
 
 # 2. export your vendor keys (built-ins: InternAI Discovery, AMD Radeon Cloud)
 export INTERN_AI_API_KEY=sk-...
 
 # 3. run the gateway (menu) or as a service
-./linux/auto-compat          # interactive menu
-./linux/auto-compat serve    # gateway only, for scripts
+./linux/llm-shim          # interactive menu
+./linux/llm-shim serve    # gateway only, for scripts
 
 # 4. point your client at http://127.0.0.1:8686
 #    model name: provider/model, e.g. intern-ai/glm-5.3
 ```
 
-Optional: `./linux/auto-compat probe --key sk-... --base-url https://vendor.example` verifies
+Optional: `./linux/llm-shim probe --key sk-... --base-url https://vendor.example` verifies
 the key, finds the working endpoint, and freezes it into `providers.json`.
 
 ## Configuration (environment variables)
@@ -66,7 +66,7 @@ the key, finds the working endpoint, and freezes it into `providers.json`.
 ## Build
 
 ```sh
-zig build -Doptimize=ReleaseSafe                      # native  -> zig-out/bin/auto-compat
+zig build -Doptimize=ReleaseSafe                      # native  -> zig-out/bin/llm-shim
 zig build -Doptimize=ReleaseSafe -Dtarget=x86_64-windows-gnu --prefix zig-out/windows
 zig build -Doptimize=ReleaseSafe -Dtarget=aarch64-macos       --prefix zig-out/macos
 zig build test                                        # unit tests

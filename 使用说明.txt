@@ -1,19 +1,19 @@
-auto-compat-zig 0.2.0 — LLM API 兼容屏蔽层网关 + 探针（单二进制，Zig 0.17，三平台）
-（版本号：auto-compat version / --version / -V 直接打印；help/菜单首行也带；0.1.x 规则：升级只递增末位）
+llm-shim 0.2.0 — LLM API 兼容屏蔽层网关 + 探针（单二进制，Zig 0.17，三平台）
+（版本号：llm-shim version / --version / -V 直接打印；help/菜单首行也带；0.1.x 规则：升级只递增末位）
 
-Windows:  auto-compat.exe        （先 $env:KEY="..." 设好密钥）
-Linux:    ./linux/auto-compat    （export KEY=... 后运行）
+Windows:  llm-shim.exe        （先 $env:KEY="..." 设好密钥）
+Linux:    ./linux/llm-shim    （export KEY=... 后运行）
 
 运行（单二进制，两种入口）：
   直接运行 → 交互菜单：1=网关 2=探针向导 3=帮助 q=退出
   子命令（脚本/服务用）：
-    auto-compat serve       启动网关（监听 127.0.0.1:8686；配置只走环境变量，不接受额外参数）
-    auto-compat probe --key-env KEY_NAME [--url 裸站点] [--out providers.json]
+    llm-shim serve       启动网关（监听 127.0.0.1:8686；配置只走环境变量，不接受额外参数）
+    llm-shim probe --key-env KEY_NAME [--url 裸站点] [--out providers.json]
                            探针：只给 key 自动找家（命中一个可行端点即停）；
                            用户 URL 全部试探；裸站点自动发现路径后缀；
                            闭环验证模型 + 档位嗅探 → 固化 providers.json
-    auto-compat help        用法 + 全部环境变量
-    auto-compat version     只打印版本号（= --version / -V）
+    llm-shim help        用法 + 全部环境变量
+    llm-shim version     只打印版本号（= --version / -V）
   说明：无参数且非终端（服务/重定向/管道）时直接起网关，与旧版一致；
         AUTO_COMPAT_MENU=1|0 可强制开/关菜单。
 
@@ -70,4 +70,4 @@ providers.json 条目（baseURL 允许裸站点，启动时自动发现路径并
 
 环境变量：AUTO_COMPAT_GATEWAY_HOST/PORT、AUTO_COMPAT_GATEWAY_TOKEN、
           AUTO_COMPAT_PROVIDERS_FILE、AUTO_COMPAT_MENU、各供应商 <apiKeyEnv>
-0.1.4 改名提示：项目/二进制 dsh-compat(-zig) -> auto-compat(-zig)；环境变量 DSH_* -> AUTO_COMPAT_*
+0.1.4 改名提示：项目/二进制 dsh-compat(-zig) -> llm-shim(-zig)；环境变量 DSH_* -> AUTO_COMPAT_*

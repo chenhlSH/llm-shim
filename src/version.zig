@@ -4,17 +4,17 @@ const std = @import("std");
 
 pub const value = "0.2.0";
 
-/// 上游 User-Agent：`auto-compat/<版本>`（由运行时版本推导，避免写死漂移）。
+/// 上游 User-Agent：`llm-shim/<版本>`（由运行时版本推导，避免写死漂移）。
 pub fn userAgent() []const u8 {
-    return "auto-compat/" ++ value;
+    return "llm-shim/" ++ value;
 }
 
-/// `auto-compat version|--version|-V`：只打版本号（stdout，exit 0），
+/// `llm-shim version|--version|-V`：只打版本号（stdout，exit 0），
 /// 便于脚本与用户核对新旧构建；main 与 probe 共用同一实现。
 pub fn print(io: std.Io) !void {
     var buffer: [128]u8 = undefined;
     var writer = std.Io.File.stdout().writer(io, &buffer);
-    try writer.interface.print("auto-compat {s}\n", .{value});
+    try writer.interface.print("llm-shim {s}\n", .{value});
     try writer.flush();
 }
 
@@ -30,5 +30,5 @@ test "version: 0.x 格式（开源里程碑可动 minor）" {
 }
 
 test "userAgent: 与运行时版本一致" {
-    try std.testing.expectEqualStrings("auto-compat/0.2.0", userAgent());
+    try std.testing.expectEqualStrings("llm-shim/0.2.0", userAgent());
 }

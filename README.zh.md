@@ -1,6 +1,6 @@
-# auto-compat-zig
+# llm-shim
 
-当前版本 **0.2.0**（`auto-compat --version` / `version` / `-V` 直接打印；`help`/菜单首行也带；0.x 规则：日常修复只递增末位，开源发布（0.2.0）动了 minor）。
+当前版本 **0.2.0**（`llm-shim --version` / `version` / `-V` 直接打印；`help`/菜单首行也带；0.x 规则：日常修复只递增末位，开源发布（0.2.0）动了 minor）。
 
 > 只想知道怎么用？见 **[使用文档.md](使用文档.md)**（快速开始 / 调用示例 / 探针 / 常见问题）。
 >
@@ -13,12 +13,12 @@
 > 屏幕上的键（1/2/3/q，回车取显示中的 `[1]`）；无效的数值环境变量启动时点名并给出实际默认值。
 >
 > 0.1.4 起：上游空闲超时默认 **600s**（`AUTO_COMPAT_IDLE_TIMEOUT_MS`，0=关），网关启动日志与 `GET /` 的
-> `limits` 块显式说明；项目/二进制/环境变量已从 dsh 命名改为 **auto-compat** / `AUTO_COMPAT_*`（见下）。
+> `limits` 块显式说明；项目/二进制/环境变量已从 dsh 命名改为 **llm-shim** / `AUTO_COMPAT_*`（见下）。
 
 ### ⚠ 0.1.4 破坏性变更：项目/二进制/环境变量改名
 
-Zig 版不再暗示 dsh（它零依赖、面向所有 AI agent）：项目 `dsh-compat-zig` → **`auto-compat-zig`**，
-二进制 `dsh-compat` → **`auto-compat`**；环境变量两版统一换到 `AUTO_COMPAT_*` 命名空间
+Zig 版不再暗示 dsh（它零依赖、面向所有 AI agent）：项目 `dsh-compat-zig` → **`llm-shim`**，
+二进制 `dsh-compat` → **`llm-shim`**；环境变量两版统一换到 `AUTO_COMPAT_*` 命名空间
 （不提供旧名回退）。**厂商密钥名与 providers.json schema 不变**。
 
 | 旧名 | 新名 |
@@ -49,7 +49,7 @@ Zig 版不再暗示 dsh（它零依赖、面向所有 AI agent）：项目 `dsh-
 ## 构建与运行
 
 ```sh
-zig build                 # 产出单二进制 zig-out/bin/auto-compat（网关 + 探针）
+zig build                 # 产出单二进制 zig-out/bin/llm-shim（网关 + 探针）
 zig build test            # 单测（档位归一、/vN 剥离、SSE 解析、图片注册表、参数分发、自愈缓存）
 python3 tests/e2e_selfheal.py   # 运行时自愈 e2e（本地假上游，确定性、零真机依赖，9 场景）
                                 # 单测另覆盖六个方言适配器（解析/组装/SSE 帧序/序列化）与自愈决策表
@@ -57,15 +57,15 @@ python3 tests/e2e_selfheal.py   # 运行时自愈 e2e（本地假上游，确定
 # 运行（密钥只走环境变量）
 export INTERN_AI_API_KEY=sk-...
 export AMD_RADEON_API_KEY=rc-...
-./zig-out/bin/auto-compat                  # 终端里直接跑 → 交互菜单
+./zig-out/bin/llm-shim                  # 终端里直接跑 → 交互菜单
 
 # 子命令（脚本/服务用，无菜单）：
-./zig-out/bin/auto-compat serve            # 网关（监听 127.0.0.1:8686）
-./zig-out/bin/auto-compat probe --key-env MY_KEY [--url 裸站点] [--out providers.json]
-./zig-out/bin/auto-compat help             # 用法 + 环境变量
+./zig-out/bin/llm-shim serve            # 网关（监听 127.0.0.1:8686）
+./zig-out/bin/llm-shim probe --key-env MY_KEY [--url 裸站点] [--out providers.json]
+./zig-out/bin/llm-shim help             # 用法 + 环境变量
 
 # 可选 providers.json（自定义上游，schema 同 TS 版）
-AUTO_COMPAT_PROVIDERS_FILE=./providers.json ./zig-out/bin/auto-compat serve
+AUTO_COMPAT_PROVIDERS_FILE=./providers.json ./zig-out/bin/llm-shim serve
 ```
 
 ### 菜单与模式
@@ -94,7 +94,7 @@ providers.json 条目：
 条目被忽略及其固化信号不生效：
 
 ```
-[auto-compat-zig] providers.json: entry "custom-1" resolves to the same endpoint as built-in "intern-ai" (…) -- same endpoint = same provider; keeping "intern-ai", ignoring the entry (…). Use a different baseURL for an independent provider.
+[llm-shim] providers.json: entry "custom-1" resolves to the same endpoint as built-in "intern-ai" (…) -- same endpoint = same provider; keeping "intern-ai", ignoring the entry (…). Use a different baseURL for an independent provider.
 ```
 
 裸模型 id 命中多家供应商时，400 错误会列出候选并给出写法（可直接照做）：
@@ -150,7 +150,7 @@ model "glm-5.3" exists in: intern-ai, custom-1; use "provider/model", e.g. "inte
 断开连接。CLI 启动网关时会在日志里注明状态：
 
 ```
-[auto-compat-zig] placeholder keepalive: ON (threshold 55000ms, streaming only; ... AUTO_COMPAT_PLACEHOLDER_MS=0 disables)
+[llm-shim] placeholder keepalive: ON (threshold 55000ms, streaming only; ... AUTO_COMPAT_PLACEHOLDER_MS=0 disables)
 ```
 
 - **发给上游前自动剥离**（省 token）：客户端把占位回灌进历史时，网关按**精确串**删除；
@@ -175,7 +175,7 @@ model "glm-5.3" exists in: intern-ai, custom-1; use "provider/model", e.g. "inte
 尝试耗尽才上抛，错误信封带 `code=TIMEOUT`）。启动日志注明：
 
 ```
-[auto-compat-zig] upstream idle timeout: ON (600000ms per attempt, retried by self-heal; AUTO_COMPAT_IDLE_TIMEOUT_MS=0 disables)
+[llm-shim] upstream idle timeout: ON (600000ms per attempt, retried by self-heal; AUTO_COMPAT_IDLE_TIMEOUT_MS=0 disables)
 ```
 
 没有它时，黑洞/半开的上游会把请求**永久挂住**（占位保活让客户端不再主动超时，问题只会更隐蔽）。
@@ -212,17 +212,17 @@ model "glm-5.3" exists in: intern-ai, custom-1; use "provider/model", e.g. "inte
 
 ```sh
 # 只给 key：按内置厂商 + 5 家免费预设找家（命中即停，不再轮询其余候选）
-./zig-out/bin/auto-compat probe --key-env MY_KEY
+./zig-out/bin/llm-shim probe --key-env MY_KEY
 
 # 裸站点 URL：路径后缀自动发现（/v1、/api/v1、/paas/v4…）
-./zig-out/bin/auto-compat probe --key-env MY_KEY --url https://developer.amd.com.cn/radeon
+./zig-out/bin/llm-shim probe --key-env MY_KEY --url https://developer.amd.com.cn/radeon
 
 # 输出固化到 providers.json（网关装载即用）；用户 URL 全部试探、命中端点与
 # 内置厂商/预设相同时按内置名固化（不写重复 custom-N）、同端点只固化一条
-./zig-out/bin/auto-compat probe --key-env MY_KEY --out providers.json --verify-models 8
+./zig-out/bin/llm-shim probe --key-env MY_KEY --out providers.json --verify-models 8
 
 # --url 可多次给出（每个值是不同的数据项）；其余选项一律只写一次。
-./zig-out/bin/auto-compat probe --key-env MY_KEY --url https://a.example --url https://b.example
+./zig-out/bin/llm-shim probe --key-env MY_KEY --url https://a.example --url https://b.example
 ```
 
 `probe` 的参数是**严格**的（0.1.6/0.1.7 起，用户裁决"只有一种显而易见写法；显式优于隐式"）：
@@ -235,7 +235,7 @@ model "glm-5.3" exists in: intern-ai, custom-1; use "provider/model", e.g. "inte
   （`--no-verfiy` → `did you mean --no-verify?`）；`--out` 后跟另一个选项按"缺值"报错
   （值不允许以 `-` 开头）。全部解析错误都不触网、不写文件。
 - `probe -h/--help`、`-V/--version` 只能单独出现：带其它参数会被拒绝并提示
-  `run: auto-compat probe --help`。
+  `run: llm-shim probe --help`。
 
 向导（菜单 2）同样只接受屏幕上展示的写法：非数字、`0`、非 y/n 一律就地重问并给出正确指令；
 回显的等价命令行与实际选项一致（含 `--verify-paid`），可直接复制复现。
@@ -313,7 +313,7 @@ e2e 增至 14 场景（新增 cli-strict，105 项断言）全绿。
 并存拒绝（不再让 inline 静默胜出）；④ `--no-verify` 与 `--verify-models`/`--verify-paid` 并存
 拒绝（"keep one"）；⑤ `--verify-models 0` 拒绝（跳过验证只有 `--no-verify` 一种写法）；
 ⑥ `probe --help`/`--version` 只能单独出现（带参数 = 冗余写法，拒绝并提示
-`run: auto-compat probe --help`；上一轮"任意位置生效"撤回）；⑦ `gateway` 别名移除
+`run: llm-shim probe --help`；上一轮"任意位置生效"撤回）；⑦ `gateway` 别名移除
 （`unknown command: gateway` + `use "serve"`），顶层 `help probe`/`version --json` 同样拒绝并
 指向正确指令；⑧ 菜单只认屏幕上的键 `1/2/3/q`（文字别名移除，回车取显示中的 `[1]`）；
 向导对非数字/`0`/非 y/n 就地重问。保留的"显式默认"：屏幕上标注的默认值（`[1]`/`[providers.json]`/
@@ -386,7 +386,7 @@ TS 版同形状同步 → 0.1.8（102 单测，新增 tests/responses-wire.spec.
 2026-10-20 静态审查修复（0.1.13）：① **网关令牌支持 `x-api-key` 载体**（Anthropic 标准客户端只发这个头，
 此前配了 token 就永远 401；两种载体等价）；② **`response.failed` 与兜底 `response.completed` 补
 `created_at`**（上一轮只补了 created/主 completed——审查抓到的遗漏；严格客户端 schema 校验下这类
-缺字段会被整条丢弃）；③ 默认构建产物 `zig-out/bin/auto-compat` 重建到当前版本（此前残留 0.1.5，
+缺字段会被整条丢弃）；③ 默认构建产物 `zig-out/bin/llm-shim` 重建到当前版本（此前残留 0.1.5，
 容易被误当最新发行物）。单测 107/107、e2e 19 场景（新增 failed/completed 的 created_at 断言与
 x-api-key 鉴权两项）全绿。TS 侧同轮修复见其 README（图片输入作用域/预算、断连传导、listen 错误、
 端口与数值环境变量严格解析等）。

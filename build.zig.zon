@@ -1,6 +1,6 @@
 .{
-    .fingerprint = 0xf580549dab512842, // 随 .name 重命名重新生成（Zig 按 name+paths 推导）
-    .name = .auto_compat_zig,
+    .fingerprint = 0x182b50736d212e15, // 随 .name 重命名重新生成（Zig 按 name+paths 推导）
+    .name = .llm_shim,
     .version = "0.2.0",
     .minimum_zig_version = "0.17.0",
     .paths = .{
