@@ -17,6 +17,9 @@ pub fn build(b: *std.Build) void {
     if (target.result.os.tag == .windows) {
         exe.root_module.linkSystemLibrary("ws2_32", .{});
     }
+    // 发布构建剥离调试信息：DWARF 会把构建机的绝对路径（用户名）嵌进二进制；
+    // -Dstrip=true 可显式控制，Debug 默认保留。
+    exe.root_module.strip = b.option(bool, "strip", "omit debug info (default: on unless Debug)") orelse (optimize != .debug);
     b.installArtifact(exe);
 
     const run_cmd = b.addRunArtifact(exe);
