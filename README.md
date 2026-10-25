@@ -51,6 +51,15 @@ export INTERN_AI_API_KEY=sk-...
 Optional: `./linux/llm-shim probe --key sk-... --base-url https://vendor.example` verifies
 the key, finds the working endpoint, and freezes it into `providers.json`.
 
+Point any client (zcode, Claude Code, anything OpenAI-compatible) at the gateway:
+
+| Setting | Value |
+|---|---|
+| Base URL | `http://127.0.0.1:8686` (`/v1` optional — stripped) |
+| API format | whichever the client speaks natively: Chat Completions · Responses · Anthropic Messages (missing upstream routes are translated automatically) |
+| Model | `provider/model`, e.g. `intern-ai/glm-5.3` |
+| API key | anything (gateway ignores it unless `AUTO_COMPAT_GATEWAY_TOKEN` is set; a client-supplied key is forwarded upstream) |
+
 ## Configuration (environment variables)
 
 | Variable | Default | Meaning |
