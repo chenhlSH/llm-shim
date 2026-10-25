@@ -35,7 +35,10 @@ Upstream vendors support arbitrary subsets of them, and each vendor has its own 
 
 ```sh
 # 1. get a binary (or build, see below)
-unzip llm-shim-<version>-多平台.zip   # linux/ windows/ macos/
+# download the asset for your platform from https://github.com/chenhlSH/llm-shim/releases
+tar xzf llm-shim-v0.2.0-linux-x86_64.tar.gz      # linux (x86_64)
+tar xzf llm-shim-v0.2.0-macos-aarch64.tar.gz     # macos (Apple Silicon)
+unzip llm-shim-v0.2.0-windows-x86_64.zip         # windows (x86_64)
 
 # 2. export your vendor keys (built-ins: InternAI Discovery, AMD Radeon Cloud)
 export INTERN_AI_API_KEY=sk-...
