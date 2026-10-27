@@ -3,3 +3,4 @@ zig-out/
 providers.json
 *.log
 __pycache__/
+release-v*/
