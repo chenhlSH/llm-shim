@@ -37,6 +37,9 @@
                      到达上游（此前只有 anthropic 入站会带上；chat/responses 的系统提示被整个丢掉）
   19. responses-wire  Responses 事件规范字段（严格客户端逐事件 schema 校验，缺字段即整条丢弃）：
                      created_at / item.id / delta.item_id / content_index / done.status / 非流式 output[].id
+  20. cline-compat    Cline Pass 兼容：入站 providerOptions 原样透传 openai 上游（only/has 逐字段
+                     相等）；上游 SSE 顶层 provider_metadata 原样回传客户端（流式注入下一帧顶层、
+                     非流式附到响应 JSON）；chat→anthropic 翻译路径上 providerOptions 被丢弃
 """
 import json
 import os
@@ -119,6 +122,22 @@ def sse_anthropic(model="fake-model"):
     return "".join(f"event: {name}\ndata: {json.dumps(payload)}\n\n" for name, payload in frames).encode()
 
 
+def sse_cline(model="fake-model"):
+    """Cline 风格 chat 流：最后一个 chunk 顶层带 provider_metadata（路由元数据）。"""
+    frames = [
+        {"id": "c1", "object": "chat.completion.chunk", "created": 1, "model": model,
+         "choices": [{"index": 0, "delta": {"role": "assistant", "content": ""}, "finish_reason": None}]},
+        {"id": "c1", "object": "chat.completion.chunk", "created": 1, "model": model,
+         "choices": [{"index": 0, "delta": {"content": "ok"}, "finish_reason": None}]},
+        {"id": "c1", "object": "chat.completion.chunk", "created": 1, "model": model,
+         "choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}],
+         "usage": {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2},
+         "provider_metadata": {"gateway": {"routing": {"finalProvider": "deepseek"}}}},
+    ]
+    body = "".join(f"data: {json.dumps(f)}\n\n" for f in frames) + "data: [DONE]\n\n"
+    return body.encode()
+
+
 def sse_tools(model="fake-model"):
     """并行双工具调用：交错 index 增量 + finish_reason=tool_calls。"""
     frames = [
@@ -175,7 +194,8 @@ class Handler(BaseHTTPRequestHandler):
             return self._json(404, {"error": {"message": "404 page not found"}})
         if mode == "auth":
             return self._json(401, {"error": {"message": "invalid api key"}})
-        if self.path in ("/v1/models", "/v1/models/"):
+        # /v9：场景 20 的 anthropic 侧供应商（同端点去重要求不同前缀）
+        if self.path in ("/v1/models", "/v1/models/", "/v9/models"):
             return self._json(200, models)
         return self._json(404, {"error": {"message": "404 page not found"}})
 
@@ -218,6 +238,8 @@ class Handler(BaseHTTPRequestHandler):
             return self._json(401, {"error": {"message": "invalid api key"}})
 
         if self.path in chat_paths:
+            if mode == "cline":
+                return self._send(200, sse_cline(), ctype="text/event-stream")
             if mode == "blackhole":
                 return  # 永不响应：连接保持打开 → 网关的上游读永久阻塞（由看门狗打断）
             if mode == "slow-first-byte" and STATE["slow_first_byte_s"] > 0:
@@ -238,6 +260,10 @@ class Handler(BaseHTTPRequestHandler):
             if mode == "tools":
                 return self._send(200, sse_tools(), ctype="text/event-stream")
             return self._send(200, sse_chat(), ctype="text/event-stream")
+
+        # 场景 20：anthropic 方言上游（providerOptions 应被丢弃）
+        if mode == "cline" and self.path.endswith("/messages"):
+            return self._send(200, sse_anthropic(), ctype="text/event-stream")
 
         # 非 chat 路径：/messages、/responses 一律 404（模拟只原生支持 openai 的厂商）
         return self._json(404, {"error": {"message": "404 page not found"}})
@@ -1478,6 +1504,74 @@ def main():
         stop(gw)
         fake.shutdown()
     results["responses-wire"] = len(FAILURES) == 0
+
+    # ---------------- 场景 20：Cline 兼容（providerOptions 透传 + provider_metadata 回传） ----------------
+    print("场景 20: Cline 兼容——providerOptions 原样透传；provider_metadata 原样回传；翻译路径丢弃")
+    workdir = scenario("cline-compat", "cline")
+    fake_port = free_port()
+    gw_port = free_port()
+    write_providers(workdir, [
+        {"name": "cline", "baseURL": f"http://127.0.0.1:{fake_port}/v1",
+         "apiKeyEnv": "FAKE_KEY", "protocol": "openai"},
+        # 同端点条目会被装载期去重（same endpoint = same provider），anthropic 侧用不同前缀
+        {"name": "cline-a", "baseURL": f"http://127.0.0.1:{fake_port}/v9",
+         "apiKeyEnv": "FAKE_KEY", "protocol": "anthropic"},
+    ])
+    fake = start_fake(fake_port)
+    gw = start_gateway(gw_port, workdir)
+    try:
+        provider_options = {"gateway": {"only": ["deepseek"], "has": ["vision", "implicit-caching"]}}
+
+        # 20a/20b：chat → chat（openai 上游）：透传 + 回传
+        clear_requests()
+        status, body = post(gw_port, "/v1/chat/completions",
+                            {"model": "cline/fake-model", "stream": True, "max_tokens": 16,
+                             "messages": [{"role": "user", "content": "hi"}],
+                             "providerOptions": provider_options})
+        check("20a 流式请求 200 且 [DONE] 完整", status == 200 and "data: [DONE]" in body, f"status={status}")
+        upstream_posts = [b for (m, p, b) in STATE["requests"] if m == "POST" and p.endswith("chat/completions")]
+        check("20a 上游恰好收到一次 chat 调用", len(upstream_posts) == 1, f"posts={len(upstream_posts)}")
+        forwarded = upstream_posts[0].get("providerOptions") if upstream_posts else None
+        check("20a providerOptions 原样透传上游（only/has 逐字段相等）",
+              forwarded == provider_options, f"forwarded={forwarded}")
+        metadata_frames = []
+        for line in body.splitlines():
+            if line.startswith("data: ") and "provider_metadata" in line:
+                try:
+                    metadata_frames.append(json.loads(line[len("data: "):])["provider_metadata"])
+                except Exception:
+                    pass
+        check("20b 客户端 SSE 收到 provider_metadata 且 finalProvider=deepseek",
+              any(m.get("gateway", {}).get("routing", {}).get("finalProvider") == "deepseek"
+                  for m in metadata_frames),
+              f"metadata_frames={metadata_frames[:2]}")
+
+        # 20c：chat 入站 → anthropic 上游（翻译路径）：providerOptions 必须被丢弃
+        clear_requests()
+        status3, _ = post(gw_port, "/v1/chat/completions",
+                          {"model": "cline-a/fake-model", "stream": True, "max_tokens": 16,
+                           "messages": [{"role": "user", "content": "hi"}],
+                           "providerOptions": provider_options})
+        anthropic_posts = [b for (m, p, b) in STATE["requests"] if m == "POST" and p.endswith("/messages")]
+        check("20c 翻译路径：请求到达 /messages 且不含 providerOptions",
+              status3 == 200 and len(anthropic_posts) == 1
+              and "providerOptions" not in anthropic_posts[0] and "provider_options" not in anthropic_posts[0],
+              f"status={status3} posts={len(anthropic_posts)} body_keys={list(anthropic_posts[0]) if anthropic_posts else None}")
+
+        # 20d：非流式：provider_metadata 附到响应 JSON 顶层
+        clear_requests()
+        status4, body4 = post(gw_port, "/v1/chat/completions",
+                              {"model": "cline/fake-model", "max_tokens": 16,
+                               "messages": [{"role": "user", "content": "hi"}],
+                               "providerOptions": provider_options})
+        payload4 = json.loads(body4) if status4 == 200 else {}
+        check("20d 非流式响应顶层带 provider_metadata（finalProvider=deepseek）",
+              payload4.get("provider_metadata", {}).get("gateway", {}).get("routing", {}).get("finalProvider") == "deepseek",
+              f"status={status4} keys={list(payload4)}")
+    finally:
+        stop(gw)
+        fake.shutdown()
+    results["cline-compat"] = len(FAILURES) == 0
 
     print()
     if FAILURES:

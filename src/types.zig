@@ -85,6 +85,10 @@ pub const Chunk = union(enum) {
     block_end: struct { index: usize, block: Block },
     usage: Usage,
     finish: FinishReason,
+    /// Cline 兼容：上游 SSE 帧顶层的 provider_metadata（原样压缩 JSON 文本）。
+    /// 只有 openai 上游翻译器会产生；anthropic/responses 入站忽略（方言无此概念，
+    /// Cline 的路由元数据只在 chat 形状上有意义——翻译路径上它会被丢弃）。
+    provider_metadata: []const u8,
 };
 
 pub const Protocol = enum { openai, anthropic, responses };
@@ -157,6 +161,10 @@ pub const GenerateRequest = struct {
     temperature: ?f64 = null,
     max_tokens: ?u64 = null,
     stop: ?[]const []const u8 = null,
+    /// Cline 兼容：入站 OpenAI Chat 顶层的 providerOptions 对象（原样压缩 JSON 文本）。
+    /// 仅 openai 方言上游会原样回填进请求体（"完整传给 Cline"是这套字段生效的前提）；
+    /// 网关不解读其内容（only/has 的路由语义属于上游服务端），翻译路径上丢弃。
+    provider_options: ?[]const u8 = null,
 };
 
 test "extractSystem: system 消息 → request.system（多段拼接/已有值不覆盖/无 system 不变）" {

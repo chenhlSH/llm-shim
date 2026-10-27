@@ -30,15 +30,20 @@ Upstream vendors support arbitrary subsets of them, and each vendor has its own 
   arguments are rejected with the correct command printed (no silent fallbacks).
 - **Diagnostics** — every request gets an id (honors client `x-request-id`); logs cover inbound
   summary, per-upstream-attempt status/code/elapsed/error snippet, and a terminal summary.
+- **Cline Pass compatibility** — top-level `providerOptions` in chat requests (e.g.
+  `gateway.only` / `gateway.has` routing constraints) is forwarded verbatim to openai-dialect
+  upstreams, and upstream `provider_metadata` (e.g. `gateway.routing.finalProvider`) is passed
+  back to the client intact (streaming: injected into the next chunk's top level; non-streaming:
+  top level of the response JSON). Dropped on translation paths (anthropic/responses upstreams).
 
 ## Quickstart
 
 ```sh
 # 1. get a binary (or build, see below)
 # download the asset for your platform from https://github.com/chenhlSH/llm-shim/releases
-tar xzf llm-shim-v0.2.0-linux-x86_64.tar.gz      # linux (x86_64)
-tar xzf llm-shim-v0.2.0-macos-aarch64.tar.gz     # macos (Apple Silicon)
-unzip llm-shim-v0.2.0-windows-x86_64.zip         # windows (x86_64)
+tar xzf llm-shim-v<version>-linux-x86_64.tar.gz   # linux (x86_64)
+tar xzf llm-shim-v<version>-macos-aarch64.tar.gz  # macos (Apple Silicon)
+unzip llm-shim-v<version>-windows-x86_64.zip      # windows (x86_64)
 
 # 2. export your vendor keys (built-ins: InternAI Discovery, AMD Radeon Cloud)
 export INTERN_AI_API_KEY=sk-...

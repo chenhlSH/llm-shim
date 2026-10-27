@@ -506,6 +506,10 @@ fn handleOpenAi(
         if (parsed.request.tools) |tools| tools.len else 0,
         parsed.request.max_tokens orelse 0,
     });
+    // Cline 兼容：透传留痕（内容不打印——only/has 是客户端的路由意图，字节数足够对账）。
+    if (parsed.request.provider_options) |po| {
+        diag.print("providerOptions passthrough ({d}B) to openai upstream\n", .{po.len});
+    }
 
     // 看门狗注册（流式/非流式都注册）：非流式只能做空闲超时（body=null → 不注入占位），
     // 流式随后回填 stream_out/body。没有它黑洞上游会把请求永久挂住。

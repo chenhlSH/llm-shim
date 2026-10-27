@@ -1,6 +1,6 @@
 # llm-shim
 
-当前版本 **0.2.0**（`llm-shim --version` / `version` / `-V` 直接打印；`help`/菜单首行也带；0.x 规则：日常修复只递增末位，开源发布（0.2.0）动了 minor）。
+当前版本 **0.2.1**（`llm-shim --version` / `version` / `-V` 直接打印；`help`/菜单首行也带；0.x 规则：日常修复只递增末位，开源发布（0.2.0）动了 minor）。
 
 > 只想知道怎么用？见 **[使用文档.md](使用文档.md)**（快速开始 / 调用示例 / 探针 / 常见问题）。
 >
@@ -423,6 +423,14 @@ CA 缺失、握手失败都叫它），不是"网关不支持 TLS"；同一二�
 结束（HTTP 状态、code、耗时、上游错误原文摘要）、请求终态汇总带 `msg=`；`x-request-id` 透传进日志。
 上游错误摘要只保留 160 字符并压平控制符（不打印 key/header）。单测 109/109（新增 diag 模块两组）、
 e2e 19 场景全绿（新增诊断行与 x-request-id 贯穿断言）。
+
+2026-10-26 Cline Pass 兼容（0.2.1）：入站 OpenAI Chat 顶层的 `providerOptions` 现在**原样透传**
+给 openai 方言上游（Cline Pass 的 `gateway.only`/`gateway.has` 路由约束依赖"字段完整到达服务端"），
+上游 SSE 帧顶层的 `provider_metadata`（如 `gateway.routing.finalProvider`）**原样回传**客户端
+（流式注入上游发元数据后的第一帧顶层，非流式附到响应 JSON）；翻译路径（上游 anthropic/responses）
+两者都丢弃（方言无此概念），日志有透传留痕。网关不解读 only/has 的取值——路由语义属于上游服务端。
+单测 112/112（+3：提取/序列化/捕获/注入/非流式附带）；e2e **20 场景 162 项断言**全绿（新增
+场景 20：透传逐字段相等、元数据回传、翻译路径丢弃、非流式附带）。
 
 2026-10-25 流式 flush 修复（0.1.17，用户问"为什么哨兵没发给 zcode/没看到保活效果"）：真因不是哨兵没生成，
 而是**生成后排进了连接缓冲却没 flush 到 socket**。Zig 的 `respondStreaming` 返回的 `BodyWriter` 有两级缓冲：

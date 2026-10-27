@@ -2,7 +2,7 @@
 //! 单独成模块便于 main/probe_cli/gateway 共用，也便于单测锁定格式。
 const std = @import("std");
 
-pub const value = "0.2.0";
+pub const value = "0.2.1";
 
 /// 上游 User-Agent：`llm-shim/<版本>`（由运行时版本推导，避免写死漂移）。
 pub fn userAgent() []const u8 {
@@ -30,5 +30,5 @@ test "version: 0.x 格式（开源里程碑可动 minor）" {
 }
 
 test "userAgent: 与运行时版本一致" {
-    try std.testing.expectEqualStrings("llm-shim/0.2.0", userAgent());
+    try std.testing.expectEqualStrings("llm-shim/0.2.1", userAgent());
 }

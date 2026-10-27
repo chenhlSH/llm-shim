@@ -227,10 +227,19 @@ pub fn parse(
             .tools = tools,
             .max_tokens = max_tokens,
             .stop = stop,
+            .provider_options = try extractProviderOptions(arena, body),
         },
         .stream = if (body.get("stream")) |value| value == .bool and value.bool else false,
         .model_echo = model_echo,
     };
+}
+
+/// Cline 兼容：提取顶层 providerOptions 对象（原样压缩 JSON），非对象一律忽略。
+/// 网关不解读内容——only/has 的路由语义属于上游服务端；这里只负责"完整传给"。
+fn extractProviderOptions(arena: std.mem.Allocator, body: std.json.ObjectMap) !?[]const u8 {
+    const value = body.get("providerOptions") orelse return null;
+    if (value != .object) return null;
+    return try std.fmt.allocPrint(arena, "{f}", .{std.json.fmt(value, .{})});
 }
 
 pub fn mapFinishToWire(kind: types.FinishReason) []const u8 {
@@ -250,6 +259,8 @@ pub fn assembleNonStream(arena: std.mem.Allocator, model_echo: []const u8, chunk
     var has_reasoning = false;
     var usage_json: []const u8 = "";
     var finish: []const u8 = "stop";
+    // Cline 兼容：最后一个 provider_metadata 原样附到非流式响应顶层。
+    var metadata_json: ?[]const u8 = null;
 
     for (chunks) |chunk| {
         switch (chunk) {
@@ -277,6 +288,7 @@ pub fn assembleNonStream(arena: std.mem.Allocator, model_echo: []const u8, chunk
                 });
             },
             .finish => |reason| finish = mapFinishToWire(reason),
+            .provider_metadata => |meta| metadata_json = meta,
             else => {},
         }
     }
@@ -302,6 +314,9 @@ pub fn assembleNonStream(arena: std.mem.Allocator, model_echo: []const u8, chunk
     try w.print(",\"finish_reason\":{f}", .{std.json.fmt(finish, .{})});
     try w.writeAll("}]"); // close choice + array
     try w.writeAll(usage_json);
+    if (metadata_json) |meta| {
+        try w.print(",\"provider_metadata\":{s}", .{meta});
+    }
     try w.writeAll("}");
     return out.written();
 }
@@ -315,6 +330,8 @@ pub const StreamOut = struct {
     finished: bool = false,
     frame_count: usize = 0,
     pending_usage: ?[]const u8 = null,
+    /// Cline 兼容：暂存的 provider_metadata，注入本批次的下一帧（原样压缩 JSON，含花括号）。
+    pending_metadata: ?[]const u8 = null,
 
     pub fn init(arena: std.mem.Allocator, model_echo: []const u8) StreamOut {
         return .{ .arena = arena, .model_echo = model_echo, .id = "" };
@@ -380,10 +397,17 @@ pub const StreamOut = struct {
                 });
                 return &.{};
             },
+            .provider_metadata => |meta| {
+                // Cline 兼容：只暂存不发射——由 sealMetadata 注入下一帧 JSON 顶层。
+                self.pending_metadata = meta;
+                return &.{};
+            },
             .finish => |reason| {
                 switch (reason) {
                     .failure => |failure| {
                         self.finished = true;
+                        // 失败帧不带路由元数据：错误对象形状不同，注入会破坏 JSON（元数据随失败一起无意义）。
+                        self.pending_metadata = null;
                         const frame = try std.fmt.allocPrint(self.arena, "data: {{\"error\":{{\"message\":{f},\"type\":\"gateway_error\",\"code\":{f}}}}}\n\ndata: [DONE]\n\n", .{
                             std.json.fmt(failure.message, .{}), std.json.fmt(failure.code, .{}),
                         });
@@ -408,7 +432,19 @@ pub const StreamOut = struct {
             try frames.insert(self.arena, 0, role_frame);
         }
         self.frame_count += frames.items.len;
+        try self.sealMetadata(frames.items);
         return frames.items;
+    }
+
+    /// Cline 兼容：把暂存的 provider_metadata 注入本批第一帧 JSON 顶层。
+    /// 帧都是 `data: {json}\n\n`，最后一个 `}` 就是对象收尾；失败帧在分支里提前返回，不会走到这。
+    fn sealMetadata(self: *StreamOut, frames: [][]const u8) !void {
+        const meta = self.pending_metadata orelse return;
+        self.pending_metadata = null;
+        if (frames.len == 0) return;
+        const frame = frames[0];
+        const close = std.mem.lastIndexOfScalar(u8, frame, '}') orelse return;
+        frames[0] = try std.fmt.allocPrint(self.arena, "{s},\"provider_metadata\":{s}}}{s}", .{ frame[0..close], meta, frame[close + 1 ..] });
     }
 
     /// 占位保活（静默时由看门狗调用）：openai 的文本增量不看 index，
@@ -536,6 +572,73 @@ test "inbound.openai parse: 空 user 跳过 / reasoning 对象形态 / stop 数�
     try std.testing.expectEqual(types.Effort.off, parsed.request.reasoning_effort.?); // disabled→off
     try std.testing.expectEqual(@as(usize, 1), parsed.request.messages.len); // 空 user 被跳过
     try std.testing.expectEqual(@as(usize, 2), parsed.request.stop.?.len);
+}
+
+test "inbound.openai parse: providerOptions 原样提取（对象保留 / 非对象忽略 / 缺省 null）" {
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+    var registry = try providers_mod.builtinRegistry(arena);
+    defer registry.deinit();
+
+    const with_po =
+        \\{"model":"intern-ai/glm-5.3","stream":true,"max_tokens":8,
+        \\ "messages":[{"role":"user","content":"hi"}],
+        \\ "providerOptions":{"gateway":{"only":["deepseek"],"has":["vision","implicit-caching"]}}}
+    ;
+    var parsed = try std.json.parseFromSliceLeaky(std.json.Value, arena, with_po, .{});
+    const got = try parse(arena, &registry, parsed.object);
+    try std.testing.expectEqualStrings(
+        "{\"gateway\":{\"only\":[\"deepseek\"],\"has\":[\"vision\",\"implicit-caching\"]}}",
+        got.request.provider_options.?,
+    );
+
+    // 非对象形态忽略（显式优于隐式：不猜字符串/数组怎么映射）
+    const bad_po =
+        \\{"model":"intern-ai/glm-5.3","stream":true,
+        \\ "messages":[{"role":"user","content":"hi"}],"providerOptions":"deepseek"}
+    ;
+    parsed = try std.json.parseFromSliceLeaky(std.json.Value, arena, bad_po, .{});
+    const got2 = try parse(arena, &registry, parsed.object);
+    try std.testing.expect(got2.request.provider_options == null);
+
+    // 缺省 null
+    const no_po =
+        \\{"model":"intern-ai/glm-5.3","stream":true,
+        \\ "messages":[{"role":"user","content":"hi"}]}
+    ;
+    parsed = try std.json.parseFromSliceLeaky(std.json.Value, arena, no_po, .{});
+    const got3 = try parse(arena, &registry, parsed.object);
+    try std.testing.expect(got3.request.provider_options == null);
+}
+
+test "inbound.openai provider_metadata: 注入下一帧顶层 / 非流式响应附带" {
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+
+    var out = StreamOut.init(arena, "m");
+    const meta = "{\"gateway\":{\"routing\":{\"finalProvider\":\"deepseek\"}}}";
+    try std.testing.expectEqual(@as(usize, 0), (try out.write(.{ .provider_metadata = meta })).len);
+    const frames = try out.write(.{ .text_delta = .{ .index = 0, .text = "ok" } });
+    // metadata 先到 → 尚未发过任何帧，text_delta 这批会先补 role 帧；注入进本批第一帧
+    try std.testing.expect(frames.len == 2);
+    const value = try frameJson(arena, frames[0]);
+    try std.testing.expectEqualStrings("deepseek", value.object.get("provider_metadata").?.object.get("gateway").?.object.get("routing").?.object.get("finalProvider").?.string);
+    // 注入是一次性的：下一帧不再携带
+    const frames2 = try out.write(.{ .text_delta = .{ .index = 0, .text = "!" } });
+    const value2 = try frameJson(arena, frames2[0]);
+    try std.testing.expect(value2.object.get("provider_metadata") == null);
+
+    // 非流式：最后一个 provider_metadata 附到响应顶层
+    const chunks = [_]types.Chunk{
+        .{ .text_delta = .{ .index = 0, .text = "ok" } },
+        .{ .provider_metadata = meta },
+        .{ .finish = .stop },
+    };
+    const assembled = try assembleNonStream(arena, "m", &chunks);
+    const parsed = try std.json.parseFromSliceLeaky(std.json.Value, arena, assembled, .{});
+    try std.testing.expectEqualStrings("deepseek", parsed.object.get("provider_metadata").?.object.get("gateway").?.object.get("routing").?.object.get("finalProvider").?.string);
 }
 
 test "inbound.openai assembleNonStream: 文本+推理+usage" {

@@ -380,6 +380,8 @@ pub const StreamOut = struct {
         var frames: std.ArrayList([]const u8) = .empty;
 
         switch (chunk) {
+            // Cline 兼容：chat 专属的路由元数据在 anthropic 形状上无对应概念，忽略（翻译路径丢弃）。
+            .provider_metadata => return &.{},
             .text_delta, .reasoning_delta, .tool_delta => {
                 if (!self.started) {
                     self.started = true;

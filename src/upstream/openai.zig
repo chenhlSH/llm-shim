@@ -305,6 +305,10 @@ pub fn serializeBody(
             try std.json.Stringify.value(stop, .{}, w);
         }
     }
+    // Cline 兼容：providerOptions 原样透传（only/has 的路由语义在服务端，网关只保证"完整传给"）。
+    if (request.provider_options) |provider_options| {
+        try w.print(",\"providerOptions\":{s}", .{provider_options});
+    }
     try w.writeAll("}");
     return out.written();
 }
@@ -366,6 +370,13 @@ pub const Translator = struct {
                 if (mapUsage(usage_value.object)) |usage| {
                     try self.chunks.append(self.arena, .{ .usage = usage });
                 }
+            }
+        }
+        // Cline 兼容：帧顶层 provider_metadata（如 gateway.routing.finalProvider）原样捕获，
+        // 由 chat 入站注入下一帧回传客户端——中转删掉它就无法验证真实上游。
+        if (root.get("provider_metadata")) |meta| {
+            if (meta == .object) {
+                try self.chunks.append(self.arena, .{ .provider_metadata = try std.fmt.allocPrint(self.arena, "{f}", .{std.json.fmt(meta, .{})}) });
             }
         }
         const choices = root.get("choices") orelse return self.chunks.items;
@@ -917,6 +928,40 @@ test "upstream.openai Translator: 推理字段优先级/工具累积/finish 收�
     try std.testing.expect(done[0].finish == .tool_calls);
     // finalize 幂等
     try std.testing.expectEqual(@as(usize, 0), (try translator.finalize()).len);
+}
+
+test "upstream.openai Translator: provider_metadata 原样捕获（Cline 兼容）" {
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+
+    var translator = Translator.init(arena, "llm-shim", &.{"reasoning_content"});
+    const frame =
+        \\{"id":"c1","choices":[{"index":0,"delta":{},"finish_reason":"stop"}],
+        \\ "usage":{"prompt_tokens":1,"completion_tokens":1},
+        \\ "provider_metadata":{"gateway":{"routing":{"finalProvider":"deepseek"}}}}
+    ;
+    const chunks = try translator.translate(frame);
+    var seen = false;
+    for (chunks) |chunk| {
+        switch (chunk) {
+            .provider_metadata => |meta| {
+                seen = true;
+                try std.testing.expectEqualStrings("{\"gateway\":{\"routing\":{\"finalProvider\":\"deepseek\"}}}", meta);
+            },
+            else => {},
+        }
+    }
+    try std.testing.expect(seen);
+
+    // 无 provider_metadata 的帧不产生该 chunk
+    const chunks2 = try translator.translate("{\"id\":\"c2\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"x\"}}]}");
+    for (chunks2) |chunk| {
+        switch (chunk) {
+            .provider_metadata => return error.TestUnexpectedResult,
+            else => {},
+        }
+    }
 }
 
 test "upstream.openai Translator: usage 映射与畸形帧/缺 finish" {

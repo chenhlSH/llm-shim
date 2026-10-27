@@ -1,4 +1,4 @@
-llm-shim 0.2.0 — LLM API 兼容屏蔽层网关 + 探针（单二进制，Zig 0.17，三平台）
+llm-shim 0.2.1 — LLM API 兼容屏蔽层网关 + 探针（单二进制，Zig 0.17，三平台）
 （版本号：llm-shim version / --version / -V 直接打印；help/菜单首行也带；0.1.x 规则：升级只递增末位）
 
 Windows:  llm-shim.exe        （先 $env:KEY="..." 设好密钥）
@@ -47,6 +47,8 @@ Linux:    ./linux/llm-shim    （export KEY=... 后运行）
         （序号/方言/URL、HTTP 状态/code/耗时/上游错误摘要）、一行终态汇总；解析失败/鉴权/404 留痕。
         流式 flush（0.1.17）：响应头立即发出，每个 SSE 帧（含占位保活帧）写完立刻推到 socket；
         此前只排进连接写缓冲，客户端要等响应结束才收到（日志有 injected 但保活实际无效）。
+        Cline Pass 兼容（0.2.1）：chat 请求体的 providerOptions 原样透传 openai 上游（only/has
+        路由约束），上游 provider_metadata（finalProvider）原样回传客户端；翻译路径丢弃。
         TLS 失败（0.1.15）：TlsInitializationFailed = 上游 TLS 握手/证书校验失败（Zig 折叠名），
         检查网关主机时间与 CA 存储；网关会给出可行动文案并重试/换方言。
         日志（0.1.14）：每个请求一行汇总（OK/FAILED code=… attempts=… switches=… 耗时），
