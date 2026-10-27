@@ -240,6 +240,40 @@ class Handler(BaseHTTPRequestHandler):
         if self.path in chat_paths:
             if mode == "cline":
                 return self._send(200, sse_cline(), ctype="text/event-stream")
+            if mode == "cline-meta-first":
+                # 元数据在首帧：真实流里元数据位置不固定（有的厂商首帧就带）
+                frames = [
+                    {"id": "c1", "object": "chat.completion.chunk", "created": 1, "model": "fake-model",
+                     "provider_metadata": {"gateway": {"routing": {"finalProvider": "deepseek"}}},
+                     "choices": [{"index": 0, "delta": {"role": "assistant", "content": "ok"}, "finish_reason": None}]},
+                    {"id": "c1", "object": "chat.completion.chunk", "created": 1, "model": "fake-model",
+                     "choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}]},
+                ]
+                return self._send(200, ("".join(f"data: {json.dumps(f)}\n\n" for f in frames) + "data: [DONE]\n\n").encode(), ctype="text/event-stream")
+            if mode == "cline-meta-mid":
+                # 元数据在流中间 + 同流两条（最后一条获胜）+ 非对象形态被忽略
+                frames = [
+                    {"id": "c1", "object": "chat.completion.chunk", "created": 1, "model": "fake-model",
+                     "choices": [{"index": 0, "delta": {"role": "assistant", "content": ""}, "finish_reason": None}]},
+                    {"id": "c1", "object": "chat.completion.chunk", "created": 1, "model": "fake-model",
+                     "provider_metadata": {"gateway": {"routing": {"finalProvider": "wrong-a"}}},
+                     "choices": [{"index": 0, "delta": {"content": "ok"}, "finish_reason": None}]},
+                    {"id": "c1", "object": "chat.completion.chunk", "created": 1, "model": "fake-model",
+                     "provider_metadata": {"gateway": {"routing": {"finalProvider": "deepseek"}}},
+                     "choices": [{"index": 0, "delta": {"content": "!"}, "finish_reason": None}]},
+                    {"id": "c1", "object": "chat.completion.chunk", "created": 1, "model": "fake-model",
+                     "provider_metadata": "not-an-object",
+                     "choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}]},
+                ]
+                return self._send(200, ("".join(f"data: {json.dumps(f)}\n\n" for f in frames) + "data: [DONE]\n\n").encode(), ctype="text/event-stream")
+            if mode == "cline-meta-only":
+                # 整个流只有元数据没有内容（极端形态）：帧仍须是合法 JSON、流仍须正常收尾
+                frames = [
+                    {"id": "c1", "object": "chat.completion.chunk", "created": 1, "model": "fake-model",
+                     "provider_metadata": {"gateway": {"routing": {"finalProvider": "deepseek"}}},
+                     "choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}]},
+                ]
+                return self._send(200, ("".join(f"data: {json.dumps(f)}\n\n" for f in frames) + "data: [DONE]\n\n").encode(), ctype="text/event-stream")
             if mode == "blackhole":
                 return  # 永不响应：连接保持打开 → 网关的上游读永久阻塞（由看门狗打断）
             if mode == "slow-first-byte" and STATE["slow_first_byte_s"] > 0:
@@ -1568,6 +1602,87 @@ def main():
         check("20d 非流式响应顶层带 provider_metadata（finalProvider=deepseek）",
               payload4.get("provider_metadata", {}).get("gateway", {}).get("routing", {}).get("finalProvider") == "deepseek",
               f"status={status4} keys={list(payload4)}")
+        # 20e：元数据在首帧（位置无关性）——真实流里元数据可能在任何 chunk 上
+        workdir = scenario("cline-meta-first", "cline-meta-first")
+        E_port = free_port(); gwE = free_port()
+        write_providers(workdir, [{"name": "cline", "baseURL": f"http://127.0.0.1:{E_port}/v1",
+                                   "apiKeyEnv": "FAKE_KEY", "protocol": "openai"}])
+        fakeE = start_fake(E_port)
+        gwE_proc = start_gateway(gwE, workdir)
+        try:
+            clear_requests()
+            st, bd = post(gwE, "/v1/chat/completions",
+                          {"model": "cline/fake-model", "stream": True, "max_tokens": 16,
+                           "messages": [{"role": "user", "content": "hi"}],
+                           "providerOptions": {"gateway": {"only": ["deepseek"]}}})
+            first_meta = None
+            ok_frames = 0
+            for line in bd.splitlines():
+                if not line.startswith("data: ") or line == "data: [DONE]":
+                    continue
+                try:
+                    obj = json.loads(line[len("data: "):])
+                except Exception:
+                    check("20e 每一帧都是合法 JSON（元数据注入不破坏帧结构）", False, f"bad_frame={line[:120]}")
+                    continue
+                ok_frames += 1
+                if "provider_metadata" in obj and first_meta is None:
+                    first_meta = obj["provider_metadata"]
+            check("20e 元数据在首帧时同样被回传（位置无关）",
+                  first_meta is not None and first_meta.get("gateway", {}).get("routing", {}).get("finalProvider") == "deepseek",
+                  f"first_meta={first_meta}")
+            check("20e 注入后所有帧仍是合法 JSON", ok_frames >= 2, f"ok_frames={ok_frames}")
+        finally:
+            stop(gwE_proc)
+            fakeE.shutdown()
+
+        # 20f/20g：同流多条元数据（最后一条获胜）+ 非对象形态忽略
+        workdir = scenario("cline-meta-mid", "cline-meta-mid")
+        F_port = free_port(); gwF = free_port()
+        write_providers(workdir, [{"name": "cline", "baseURL": f"http://127.0.0.1:{F_port}/v1",
+                                   "apiKeyEnv": "FAKE_KEY", "protocol": "openai"}])
+        fakeF = start_fake(F_port)
+        gwF_proc = start_gateway(gwF, workdir)
+        try:
+            clear_requests()
+            st, bd = post(gwF, "/v1/chat/completions",
+                          {"model": "cline/fake-model", "stream": True, "max_tokens": 16,
+                           "messages": [{"role": "user", "content": "hi"}]})
+            metas = []
+            for line in bd.splitlines():
+                if line.startswith("data: ") and "provider_metadata" in line:
+                    try:
+                        metas.append(json.loads(line[len("data: "):])["provider_metadata"])
+                    except Exception:
+                        check("20g 非对象元数据帧不产生损坏 JSON", False, f"bad={line[:120]}")
+            finals = [m.get("gateway", {}).get("routing", {}).get("finalProvider") for m in metas]
+            check("20f 同流多条元数据：全部转发且保序（wrong-a → deepseek，网关不裁决）",
+                  finals == ["wrong-a", "deepseek"], f"finals={finals}")
+            check("20g 非对象形态的 provider_metadata 被忽略（不产生帧/不破坏 JSON）",
+                  all(isinstance(m, dict) for m in metas), f"metas={metas}")
+        finally:
+            stop(gwF_proc)
+            fakeF.shutdown()
+
+        # 20h：只有元数据没有内容的流——网关仍须正常收尾（不空转、不挂）
+        workdir = scenario("cline-meta-only", "cline-meta-only")
+        H_port = free_port(); gwH = free_port()
+        write_providers(workdir, [{"name": "cline", "baseURL": f"http://127.0.0.1:{H_port}/v1",
+                                   "apiKeyEnv": "FAKE_KEY", "protocol": "openai"}])
+        fakeH = start_fake(H_port)
+        gwH_proc = start_gateway(gwH, workdir)
+        try:
+            clear_requests()
+            st, bd = post(gwH, "/v1/chat/completions",
+                          {"model": "cline/fake-model", "stream": True, "max_tokens": 16,
+                           "messages": [{"role": "user", "content": "hi"}]})
+            has_meta = any("provider_metadata" in line for line in bd.splitlines() if line.startswith("data: "))
+            check("20h 仅元数据流：200 + 元数据回传 + 正常 [DONE]",
+                  st == 200 and has_meta and "data: [DONE]" in bd, f"status={st} has_meta={has_meta}")
+        finally:
+            stop(gwH_proc)
+            fakeH.shutdown()
+
     finally:
         stop(gw)
         fake.shutdown()

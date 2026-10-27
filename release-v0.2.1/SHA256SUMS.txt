@@ -1,3 +1,3 @@
-de7a418c5b266fa5bd9e878ccb39ebac09b81481a6fbaef759f6eed943fca04b  llm-shim-v0.2.1-linux-x86_64.tar.gz
-a62d68659251db49605f39f72641f0bd3ff84b7970348378653561937c9653e0  llm-shim-v0.2.1-macos-aarch64.tar.gz
-a3bdd2a9217bed3ce08838043c6824aee8b6e12e49f355b01449b8e3284f1f25  llm-shim-v0.2.1-windows-x86_64.zip
+7d06fcdd1f71948c983f0b15089ff5b42d82184affc48ef4cbe8ed17b2b7f006  llm-shim-v0.2.1-linux-x86_64.tar.gz
+7ebe3153e2d791cbb7f17a4876dae82b583610609aea77f830ec971157c057e0  llm-shim-v0.2.1-macos-aarch64.tar.gz
+96d86a1420edfa4688a07e97f7d431b53f6c264db39d29dfb0c605c7ea23337b  llm-shim-v0.2.1-windows-x86_64.zip

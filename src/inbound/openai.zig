@@ -332,6 +332,9 @@ pub const StreamOut = struct {
     pending_usage: ?[]const u8 = null,
     /// Cline 兼容：暂存的 provider_metadata，注入本批次的下一帧（原样压缩 JSON，含花括号）。
     pending_metadata: ?[]const u8 = null,
+    /// 本批 flush 出的独立元数据帧数（目前仅作注释性计数；sealMetadata 用
+    /// "帧里已有 provider_metadata 键"识别并跳过它们）。
+    flushed_in_batch: usize = 0,
 
     pub fn init(arena: std.mem.Allocator, model_echo: []const u8) StreamOut {
         return .{ .arena = arena, .model_echo = model_echo, .id = "" };
@@ -398,9 +401,15 @@ pub const StreamOut = struct {
                 return &.{};
             },
             .provider_metadata => |meta| {
-                // Cline 兼容：只暂存不发射——由 sealMetadata 注入下一帧 JSON 顶层。
+                // Cline 兼容：只暂存不发射——由末尾的 sealMetadata 注入"内容帧"顶层。
+                // 同流多条时全部转发（先到的 flush 成独立元数据帧）：元数据是上游逐帧陈述的
+                // 路由事实，网关不做"最后一条获胜"的裁决——删哪条都是替客户端做决定。
+                // 注意：不能在这里提前 return——会绕过末尾的 role 帧补发与 sealMetadata。
+                if (self.pending_metadata) |queued| {
+                    try frames.append(self.arena, try self.flushMetadata(queued));
+                    self.flushed_in_batch += 1; // sealMetadata 跳过 flush 帧，只注入内容帧
+                }
                 self.pending_metadata = meta;
-                return &.{};
             },
             .finish => |reason| {
                 switch (reason) {
@@ -436,15 +445,52 @@ pub const StreamOut = struct {
         return frames.items;
     }
 
+    test "write: provider_metadata 分支不走提前 return（flush 帧不被丢弃）" {
+        var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+        defer arena_state.deinit();
+        const arena = arena_state.allocator();
+        var out = StreamOut.init(arena, "m");
+        _ = try out.write(.{ .provider_metadata = "{\"a\":1}" });
+        // 第二条到达：flush(a) 必须真的发出来（此前这里提前 return 把 flush 帧丢了）
+        const frames = try out.write(.{ .provider_metadata = "{\"b\":2}" });
+        // 实测形状：[role 帧（本批首帧、无键）, flush(a) 独立元数据帧]；b 留暂存给下一内容帧
+        try std.testing.expectEqual(@as(usize, 2), frames.len);
+        const role_value = try frameJson(arena, frames[0]);
+        try std.testing.expect(role_value.object.get("provider_metadata") == null);
+        const value = try frameJson(arena, frames[1]);
+        try std.testing.expectEqual(@as(i64, 1), value.object.get("provider_metadata").?.object.get("a").?.integer);
+    }
+
+    /// 独立的元数据帧（同流多条时，先到的直接成帧转发，不并进内容帧）。
+    fn flushMetadata(self: *StreamOut, meta: []const u8) ![]const u8 {
+        return std.fmt.allocPrint(self.arena, "data: {{\"id\":\"gwchat\",\"object\":\"chat.completion.chunk\",\"created\":{d},\"model\":{f},\"choices\":[],\"provider_metadata\":{s}}}\n\n", .{
+            clock.unixMilli(), std.json.fmt(self.model_echo, .{}), meta,
+        });
+    }
+
     /// Cline 兼容：把暂存的 provider_metadata 注入本批第一帧 JSON 顶层。
     /// 帧都是 `data: {json}\n\n`，最后一个 `}` 就是对象收尾；失败帧在分支里提前返回，不会走到这。
     fn sealMetadata(self: *StreamOut, frames: [][]const u8) !void {
         const meta = self.pending_metadata orelse return;
-        self.pending_metadata = null;
-        if (frames.len == 0) return;
-        const frame = frames[0];
-        const close = std.mem.lastIndexOfScalar(u8, frame, '}') orelse return;
-        frames[0] = try std.fmt.allocPrint(self.arena, "{s},\"provider_metadata\":{s}}}{s}", .{ frame[0..close], meta, frame[close + 1 ..] });
+        // 关键：本批没有可注入帧（len==0，或全是 flush 元数据帧）时**保留暂存**——
+        // 此前置 null 会把元数据吞掉（它本该由下一个内容帧带出去）。
+        // 两段扫描：先找 flush 帧之后的"内容帧"（元数据跟内容走，role 帧保持纯净）；
+        // 没有内容帧（如本批只有 flush 帧 / usage 延迟帧）才退而注入首个无键帧。
+        var index: usize = 0;
+        var saw_flushed = false;
+        while (index < frames.len) : (index += 1) {
+            const frame = frames[index];
+            if (std.mem.indexOf(u8, frame, "\"provider_metadata\":") != null) {
+                saw_flushed = true; // flush 帧已带键，跳过
+                continue;
+            }
+            const is_role_frame = index == 0 and saw_flushed == false and std.mem.indexOf(u8, frame, "\"role\":\"assistant\"") != null and frames.len > 1;
+            if (is_role_frame and index + 1 < frames.len) continue; // role 帧后还有内容帧 → 让位
+            const close = std.mem.lastIndexOfScalar(u8, frame, '}') orelse continue;
+            frames[index] = try std.fmt.allocPrint(self.arena, "{s},\"provider_metadata\":{s}}}{s}", .{ frame[0..close], meta, frame[close + 1 ..] });
+            self.pending_metadata = null; // 注入成功才清
+            return;
+        }
     }
 
     /// 占位保活（静默时由看门狗调用）：openai 的文本增量不看 index，
@@ -612,6 +658,39 @@ test "inbound.openai parse: providerOptions 原样提取（对象保留 / 非对
     try std.testing.expect(got3.request.provider_options == null);
 }
 
+test "inbound.openai provider_metadata: 同流多条全部转发且保序（不裁决最后一条）" {
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+
+    var out = StreamOut.init(arena, "m");
+    _ = try out.write(.{ .provider_metadata = "{\"a\":1}" }); // 暂存
+    _ = try out.write(.{ .text_delta = .{ .index = 0, .text = "x" } }); // 注入首个无键帧（role 帧）
+    // 第二条元数据到达：该批无帧可注（b 继续暂存），随后的内容帧承接
+    _ = try out.write(.{ .provider_metadata = "{\"b\":2}" }); // 无帧可注（b 留暂存）
+    const frames = try out.write(.{ .text_delta = .{ .index = 0, .text = "y" } });
+    try std.testing.expect(frames.len >= 1);
+    const value = try frameJson(arena, frames[0]);
+    try std.testing.expectEqual(@as(i64, 2), value.object.get("provider_metadata").?.object.get("b").?.integer);
+    try std.testing.expect(value.object.get("provider_metadata").?.object.get("a") == null);
+
+    // 同一批次里连续两条元数据（中间无内容帧）：c flush 成独立帧发出（seal 扫描跳过
+    // 带键帧 → 本批无内容帧可注 → d 继续暂存）；role 帧条件 frames.len>0 且 frame_count==0，
+    // 但 insert 在 seal 之前对整个批次生效——frames=[flush(c)] 时 role 插在 flush 前。
+    var out2 = StreamOut.init(arena, "m");
+    _ = try out2.write(.{ .provider_metadata = "{\"c\":3}" });
+    const frames2 = try out2.write(.{ .provider_metadata = "{\"d\":4}" });
+    try std.testing.expectEqual(@as(usize, 2), frames2.len);
+    const value_role = try frameJson(arena, frames2[0]);
+    try std.testing.expect(value_role.object.get("provider_metadata") == null); // role 帧不夹带
+    const value2 = try frameJson(arena, frames2[1]);
+    try std.testing.expectEqual(@as(i64, 3), value2.object.get("provider_metadata").?.object.get("c").?.integer);
+    // d 仍在暂存，等下一个内容帧
+    const frames3 = try out2.write(.{ .text_delta = .{ .index = 0, .text = "z" } });
+    const value3 = try frameJson(arena, frames3[0]);
+    try std.testing.expectEqual(@as(i64, 4), value3.object.get("provider_metadata").?.object.get("d").?.integer);
+}
+
 test "inbound.openai provider_metadata: 注入下一帧顶层 / 非流式响应附带" {
     var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena_state.deinit();
@@ -621,9 +700,12 @@ test "inbound.openai provider_metadata: 注入下一帧顶层 / 非流式响应�
     const meta = "{\"gateway\":{\"routing\":{\"finalProvider\":\"deepseek\"}}}";
     try std.testing.expectEqual(@as(usize, 0), (try out.write(.{ .provider_metadata = meta })).len);
     const frames = try out.write(.{ .text_delta = .{ .index = 0, .text = "ok" } });
-    // metadata 先到 → 尚未发过任何帧，text_delta 这批会先补 role 帧；注入进本批第一帧
+    // metadata 先到 → text_delta 这批会先补 role 帧；注入目标是**内容帧**（role 帧保持纯净，
+    // 元数据跟内容走——探针锁定的形状：[role 无键, content 带键]）
     try std.testing.expect(frames.len == 2);
-    const value = try frameJson(arena, frames[0]);
+    const role_value = try frameJson(arena, frames[0]);
+    try std.testing.expect(role_value.object.get("provider_metadata") == null);
+    const value = try frameJson(arena, frames[1]);
     try std.testing.expectEqualStrings("deepseek", value.object.get("provider_metadata").?.object.get("gateway").?.object.get("routing").?.object.get("finalProvider").?.string);
     // 注入是一次性的：下一帧不再携带
     const frames2 = try out.write(.{ .text_delta = .{ .index = 0, .text = "!" } });
