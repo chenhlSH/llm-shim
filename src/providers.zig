@@ -40,6 +40,8 @@ pub const Profile = struct {
     effort_accepted: ?bool = null,
     /// 内置剖面（实测怪癖数据）——同端点去重日志据此说明"内置优先"。
     builtin: bool = false,
+    /// 免费内置（0.3.0 起）：key 在场时装载期在线发现端点+模型目录（失败回退静态表）。
+    discover_models: bool = false,
 };
 
 const intern_ai_models = [_]Model{
@@ -55,6 +57,29 @@ const amd_models = [_]Model{
 const amd_aliases = [_]Alias{
     .{ .from = "mimo-v2.6-flash", .to = "MiMo-V2.6-Flash" },
     .{ .from = "glm-5.3-flash", .to = "GLM-5.3-Flash" },
+};
+
+// 免费内置（0.3.0 起，有 key 才上车）：静态兜底表只是 /models 失败时的保守目录；
+// key 在场时装载期在线发现真实目录（discover_models）。各家免费目录变动频繁，
+// 以探针固化（verifiedModels）与在线发现为准——文档已标注"剖面待实测校准"。
+const groq_models = [_]Model{
+    .{ .id = "llama-3.3-70b-versatile", .name = "Llama 3.3 70B Versatile", .context_window = 131_072, .vision = false },
+    .{ .id = "qwen/qwen3-32b", .name = "Qwen3 32B", .context_window = 131_072, .vision = false },
+};
+const github_models_catalog = [_]Model{
+    .{ .id = "openai/gpt-4.1-mini", .name = "GPT-4.1 Mini", .context_window = 1_000_000, .vision = true },
+    .{ .id = "meta/Llama-4-Scout-17B-16E-Instruct", .name = "Llama 4 Scout 17B", .context_window = 131_072, .vision = true },
+};
+const gemini_models = [_]Model{
+    .{ .id = "gemini-2.5-flash", .name = "Gemini 2.5 Flash", .context_window = 1_048_576, .vision = true },
+    .{ .id = "gemini-2.5-flash-lite", .name = "Gemini 2.5 Flash Lite", .context_window = 1_048_576, .vision = true },
+};
+const hunyuan_models = [_]Model{
+    .{ .id = "hunyuan-lite", .name = "Hunyuan Lite", .context_window = 262_144, .vision = false },
+};
+const zhipu_models = [_]Model{
+    .{ .id = "glm-4.7-flash", .name = "GLM-4.7 Flash", .context_window = 131_072, .vision = false },
+    .{ .id = "glm-4.6v-flash", .name = "GLM-4.6V Flash", .context_window = 131_072, .vision = true },
 };
 
 pub const Registry = struct {
@@ -76,9 +101,30 @@ pub const Registry = struct {
     }
 };
 
-/// 内置两家（实测剖面，TS 版 vendors/*.models.ts 的对应物）。
-pub fn builtinRegistry(allocator: std.mem.Allocator) !Registry {
-    var profiles: std.ArrayList(Profile) = .empty;
+/// 新免费内置供应商的"有 key 才上车"开关（纯函数入参，便于单测；
+/// 环境读取集中在 freeKeyFlagsFromEnv）。
+pub const FreeKeyFlags = struct {
+    groq: bool = false,
+    github_models: bool = false,
+    gemini: bool = false,
+    hunyuan: bool = false,
+    zhipu: bool = false,
+};
+
+pub fn freeKeyFlagsFromEnv() FreeKeyFlags {
+    return .{
+        .groq = env.get("GROQ_API_KEY") != null,
+        .github_models = env.get("GITHUB_MODELS_TOKEN") != null,
+        .gemini = env.get("GEMINI_API_KEY") != null,
+        .hunyuan = env.get("HUNYUAN_API_KEY") != null,
+        .zhipu = env.get("ZHIPU_API_KEY") != null,
+    };
+}
+
+/// 内置剖面（实测/半实测数据，TS 版 vendors/*.models.ts 的对应物）：
+/// intern-ai/amd 无条件注册（兼容现状）；免费五家按 flags 有 key 才上车——
+/// 避免默认 /models 被一堆没 key 的供应商淹没（0.3.0 用户裁决）。
+pub fn appendBuiltinProfiles(allocator: std.mem.Allocator, profiles: *std.ArrayList(Profile), flags: FreeKeyFlags) !void {
     try profiles.append(allocator, .{
         .name = "intern-ai",
         .display_name = "InternAI Discovery",
@@ -106,6 +152,94 @@ pub fn builtinRegistry(allocator: std.mem.Allocator) !Registry {
         .free = true,
         .builtin = true,
     });
+    if (flags.groq) try profiles.append(allocator, .{
+        .name = "groq",
+        .display_name = "Groq",
+        .base_url = "https://api.groq.com/openai/v1",
+        .api_key_env = "GROQ_API_KEY",
+        .protocol = .openai,
+        .models = &groq_models,
+        .effort_strategy = .omit_always,
+        .reasoning_delta_fields = &.{ "reasoning", "reasoning_content" },
+        .honors_stop = true,
+        .free = true,
+        .builtin = true,
+        .discover_models = true,
+    });
+    if (flags.github_models) try profiles.append(allocator, .{
+        .name = "github-models",
+        .display_name = "GitHub Models",
+        .base_url = "https://models.github.ai/inference",
+        .api_key_env = "GITHUB_MODELS_TOKEN",
+        .protocol = .openai,
+        .models = &github_models_catalog,
+        .effort_strategy = .omit_always,
+        .reasoning_delta_fields = &.{ "reasoning", "reasoning_content" },
+        .honors_stop = true,
+        .free = true,
+        .builtin = true,
+        .discover_models = true,
+    });
+    if (flags.gemini) try profiles.append(allocator, .{
+        .name = "gemini",
+        .display_name = "Google Gemini",
+        .base_url = "https://generativelanguage.googleapis.com/v1beta/openai",
+        .api_key_env = "GEMINI_API_KEY",
+        .protocol = .openai,
+        .models = &gemini_models,
+        .effort_strategy = .passthrough,
+        .reasoning_delta_fields = &.{ "reasoning", "reasoning_content" },
+        .honors_stop = true,
+        .free = true,
+        .builtin = true,
+        .discover_models = true,
+    });
+    if (flags.hunyuan) try profiles.append(allocator, .{
+        .name = "hunyuan",
+        .display_name = "Tencent Hunyuan",
+        .base_url = "https://api.hunyuan.cloud.tencent.com/v1",
+        .api_key_env = "HUNYUAN_API_KEY",
+        .protocol = .openai,
+        .models = &hunyuan_models,
+        .effort_strategy = .omit_always,
+        .reasoning_delta_fields = &.{ "reasoning", "reasoning_content" },
+        .honors_stop = true,
+        .free = true,
+        .builtin = true,
+        .discover_models = true,
+    });
+    if (flags.zhipu) try profiles.append(allocator, .{
+        .name = "zhipu",
+        .display_name = "Zhipu BigModel",
+        .base_url = "https://open.bigmodel.cn/api/paas/v4",
+        .api_key_env = "ZHIPU_API_KEY",
+        .protocol = .openai,
+        .models = &zhipu_models,
+        .effort_strategy = .passthrough_off_omit,
+        .reasoning_delta_fields = &.{ "reasoning_content", "reasoning" },
+        .honors_stop = true,
+        .free = true,
+        .builtin = true,
+        .discover_models = true,
+    });
+}
+
+/// `<API_KEY_ENV>_BASE_URL` 端点覆盖（所有内置供应商统一规则）：
+/// 自托管代理与 e2e 假上游都靠它把内置指到别处。空值忽略。
+pub fn overrideBuiltinBaseUrls(allocator: std.mem.Allocator, profiles: *std.ArrayList(Profile)) void {
+    for (profiles.items) |*profile| {
+        const override_key = std.fmt.allocPrint(allocator, "{s}_BASE_URL", .{profile.api_key_env}) catch continue;
+        defer allocator.free(override_key);
+        const override = env.get(override_key) orelse continue;
+        if (override.len == 0) continue;
+        profile.base_url = allocator.dupe(u8, override) catch continue;
+    }
+}
+
+pub fn builtinRegistry(allocator: std.mem.Allocator) !Registry {
+    var profiles: std.ArrayList(Profile) = .empty;
+    try appendBuiltinProfiles(allocator, &profiles, freeKeyFlagsFromEnv());
+    overrideBuiltinBaseUrls(allocator, &profiles);
     return .{ .allocator = allocator, .profiles = profiles };
 }
 
@@ -407,6 +541,39 @@ pub fn loadRegistryWith(allocator: std.mem.Allocator, io: std.Io, path_override:
             .effort_accepted = effort_accepted,
         });
     }
+
+    // 免费内置（discover_models=true 且 key 在场）：装载期在线发现端点+模型目录。
+    // 失败回退静态兜底表（剖面仍可用，目录保守）；与 custom 条目共用同一套探测机制。
+    for (registry.profiles.items) |*profile| {
+        if (!profile.discover_models) continue;
+        const api_key = env.get(profile.api_key_env) orelse continue;
+        std.debug.print("[llm-shim] providers: built-in \"{s}\": discovering models at {s}\n", .{ profile.name, profile.base_url });
+        var discover_client: std.http.Client = .{ .allocator = allocator, .io = io };
+        defer discover_client.deinit();
+        if (probe_mod.resolveApiBase(allocator, &discover_client, profile.base_url, api_key)) |resolved| {
+            if (resolved) |base| {
+                profile.base_url = try allocator.dupe(u8, base);
+                allocator.free(base);
+                if (probe_mod.detectModels(allocator, &discover_client, profile.base_url, api_key)) |detected| {
+                    if (detected.len > 0) {
+                        var models: std.ArrayList(Model) = .empty;
+                        for (detected) |model| {
+                            try models.append(allocator, .{
+                                .id = model.id,
+                                .name = if (model.name.len > 0) model.name else model.id,
+                                .context_window = model.context_window orelse 131_072,
+                                .vision = model.vision,
+                            });
+                        }
+                        profile.models = try models.toOwnedSlice(allocator);
+                        profile.detected = true;
+                    }
+                } else |_| {}
+            } else {
+                // resolveApiBase 返回 null（裸站点没探出后缀）：保留静态兜底表与原 base_url
+            }
+        } else |_| {}
+    }
     return registry;
 }
 
@@ -478,6 +645,47 @@ test "upsertProviders: 空文档/坏 JSON/二次合并幂等" {
     const third_pass = try upsertProviders(arena, "{not json", &entries);
     const parsed_third = try std.json.parseFromSliceLeaky(std.json.Value, arena, third_pass, .{});
     try std.testing.expectEqual(@as(usize, 2), parsed_third.array.items.len);
+}
+
+test "appendBuiltinProfiles: 有 key 才上车（flags 双态 + 部分态）" {
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+
+    // 全关：恰两家（intern-ai + amd，兼容现状）
+    var off: std.ArrayList(Profile) = .empty;
+    try appendBuiltinProfiles(arena, &off, .{});
+    try std.testing.expectEqual(@as(usize, 2), off.items.len);
+    try std.testing.expectEqualStrings("intern-ai", off.items[0].name);
+    try std.testing.expectEqualStrings("amd-radeon", off.items[1].name);
+
+    // 全开：七家，按注册顺序；新五家 free/builtin/discover_models 全开
+    var all: std.ArrayList(Profile) = .empty;
+    try appendBuiltinProfiles(arena, &all, .{ .groq = true, .github_models = true, .gemini = true, .hunyuan = true, .zhipu = true });
+    try std.testing.expectEqual(@as(usize, 7), all.items.len);
+    const expected_names = [_][]const u8{ "intern-ai", "amd-radeon", "groq", "github-models", "gemini", "hunyuan", "zhipu" };
+    for (expected_names, 0..) |name, index| {
+        try std.testing.expectEqualStrings(name, all.items[index].name);
+    }
+    for (all.items[2..]) |profile| {
+        try std.testing.expect(profile.free and profile.builtin and profile.discover_models);
+    }
+    // 抽查关键剖面数据
+    try std.testing.expectEqualStrings("https://api.groq.com/openai/v1", all.items[2].base_url);
+    try std.testing.expectEqualStrings("GROQ_API_KEY", all.items[2].api_key_env);
+    try std.testing.expectEqual(EffortStrategy.omit_always, all.items[2].effort_strategy);
+    try std.testing.expectEqualStrings("https://generativelanguage.googleapis.com/v1beta/openai", all.items[4].base_url);
+    try std.testing.expectEqual(EffortStrategy.passthrough, all.items[4].effort_strategy);
+    try std.testing.expectEqualStrings("https://open.bigmodel.cn/api/paas/v4", all.items[6].base_url);
+    try std.testing.expectEqual(EffortStrategy.passthrough_off_omit, all.items[6].effort_strategy);
+    // github-models 的模型 id 含斜杠：静态表原样保留（provider 前缀按首个 / 切分）
+    try std.testing.expectEqualStrings("openai/gpt-4.1-mini", all.items[3].models[0].id);
+
+    // 部分态：只开 groq → 三家
+    var partial: std.ArrayList(Profile) = .empty;
+    try appendBuiltinProfiles(arena, &partial, .{ .groq = true });
+    try std.testing.expectEqual(@as(usize, 3), partial.items.len);
+    try std.testing.expectEqualStrings("groq", partial.items[2].name);
 }
 
 test "builtinRegistry: 两家内置剖面" {

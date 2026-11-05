@@ -1,4 +1,4 @@
-llm-shim 0.2.1 — LLM API 兼容屏蔽层网关 + 探针（单二进制，Zig 0.17，三平台）
+llm-shim 0.3.0 — LLM API 兼容屏蔽层网关 + 探针（单二进制，Zig 0.17.1，三平台）
 （版本号：llm-shim version / --version / -V 直接打印；help/菜单首行也带；0.1.x 规则：升级只递增末位）
 
 Windows:  llm-shim.exe        （先 $env:KEY="..." 设好密钥）

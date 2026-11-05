@@ -1,6 +1,6 @@
 # llm-shim
 
-当前版本 **0.2.1**（`llm-shim --version` / `version` / `-V` 直接打印；`help`/菜单首行也带；0.x 规则：日常修复只递增末位，开源发布（0.2.0）动了 minor）。
+当前版本 **0.3.0**（`llm-shim --version` / `version` / `-V` 直接打印；`help`/菜单首行也带；0.x 规则：日常修复只递增末位，开源发布（0.2.0）动了 minor）。
 
 > 只想知道怎么用？见 **[使用文档.md](使用文档.md)**（快速开始 / 调用示例 / 探针 / 常见问题）。
 >
@@ -37,7 +37,7 @@ Zig 版不再暗示 dsh（它零依赖、面向所有 AI agent）：项目 `dsh-
 
 
 
-用 **Zig 0.17（纯 std，零第三方依赖）** 复刻的 LLM API 兼容屏蔽层网关——TS 版
+用 **Zig 0.17.1（纯 std，零第三方依赖）** 复刻的 LLM API 兼容屏蔽层网关——TS 版
 `dsh-llm-compat` 的 127.0.0.1 中转核心功能。**单二进制**（网关 + 闭环探针）：监听
 本地端口，把 OpenAI Chat / OpenAI Responses / Anthropic Messages 三种入站方言翻译
 到三种上游方言，厂商怪癖（思考档位、参数白名单、错误信封、无状态化）全部屏蔽在内部。
@@ -205,13 +205,27 @@ model "glm-5.3" exists in: intern-ai, custom-1; use "provider/model", e.g. "inte
 | `intern-ai` | discovery-api.intern-ai.org.cn/v1 | glm-5.3, deepseek-v4-flash-vision | off→none、honorsStop |
 | `amd-radeon` | developer.amd.com.cn/radeon/api/v1 | MiMo-V2.6-Flash, GLM-5.3-Flash | 档位钳制、honorsStop=false、别名表 |
 
+**免费内置（0.3.0 起，有对应 key 环境变量才注册；`<API_KEY_ENV>_BASE_URL` 可指到自托管代理）**：
+
+| 路由 | 端点 | 静态兜底模型 | 要点 |
+|---|---|---|---|
+| `groq` | api.groq.com/openai/v1 | llama-3.3-70b-versatile, qwen/qwen3-32b | 永久免费档（~30 RPM）；档位不透传 |
+| `github-models` | models.github.ai/inference | openai/gpt-4.1-mini, meta/Llama-4-Scout-17B-16E-Instruct | GitHub PAT；模型 id 自带斜杠 |
+| `gemini` | generativelanguage.googleapis.com/v1beta/openai | gemini-2.5-flash, gemini-2.5-flash-lite | 免费档配额动态化；档位透传 |
+| `hunyuan` | api.hunyuan.cloud.tencent.com/v1 | hunyuan-lite | 完全免费，256K |
+| `zhipu` | open.bigmodel.cn/api/paas/v4 | glm-4.7-flash, glm-4.6v-flash（视觉） | 长期免费 Flash 系列；GLM-4.5-Flash 已下线 |
+
+新五家 key 在场时装载期**在线发现模型目录**（失败回退静态兜底表）；剖面为保守默认，
+**待实测校准**——跑一次探针即把 verifiedModels/effortAccepted 固化进 providers.json（同名条目
+覆盖内置路由字段）。
+
 ## 探针（同一二进制的 `probe` 模式 / 菜单选项 2）
 
 移植了 TS 版的闭环探针 + 路径自动发现（`resolveApiBase`，15 种候选后缀 ×
 祖先层级剥离 + 闭环验证）：
 
 ```sh
-# 只给 key：按内置厂商 + 5 家免费预设找家（命中即停，不再轮询其余候选）
+# 只给 key：按内置厂商 + 7 家免费预设找家（命中即停，不再轮询其余候选）
 ./zig-out/bin/llm-shim probe --key-env MY_KEY
 
 # 裸站点 URL：路径后缀自动发现（/v1、/api/v1、/paas/v4…）
@@ -423,6 +437,15 @@ CA 缺失、握手失败都叫它），不是"网关不支持 TLS"；同一二�
 结束（HTTP 状态、code、耗时、上游错误原文摘要）、请求终态汇总带 `msg=`；`x-request-id` 透传进日志。
 上游错误摘要只保留 160 字符并压平控制符（不打印 key/header）。单测 109/109（新增 diag 模块两组）、
 e2e 19 场景全绿（新增诊断行与 x-request-id 贯穿断言）。
+
+2026-11-05 免费上游内置化（0.3.0，工具链 Zig 0.17.1）：Groq、GitHub Models、Gemini、腾讯混元
+（hunyuan-lite）成为内置供应商，智谱内置化（glm-4.7-flash / glm-4.6v-flash）——**有对应 key 环境
+变量才注册**（无 key 时 /providers 仍只有 intern-ai + amd），`<API_KEY_ENV>_BASE_URL` 可指到自托管
+代理；key 在场时装载期在线发现模型目录（失败回退静态兜底表）。探针预设新增 mistral 与阿里百炼
+（90 天试用额度），探测后缀补 `/v1beta/openai`（Gemini 兼容层）与 `/inference`（GitHub Models）。
+新剖面为保守默认、待实测校准。工具链抬到 0.17.1（纯修 bug 补丁，四个 std 规避经查仍需保留，
+见 NOTES.zh.md）。单测 116/116；e2e **21 场景 172 项断言**全绿（新增场景 21：条件注册双向断言 +
+在线发现 + 开箱即用链路）。
 
 2026-10-26 Cline Pass 兼容（0.2.1）：入站 OpenAI Chat 顶层的 `providerOptions` 现在**原样透传**
 给 openai 方言上游（Cline Pass 的 `gateway.only`/`gateway.has` 路由约束依赖"字段完整到达服务端"），

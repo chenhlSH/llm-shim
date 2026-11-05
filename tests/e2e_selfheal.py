@@ -40,6 +40,8 @@
   20. cline-compat    Cline Pass 兼容：入站 providerOptions 原样透传 openai 上游（only/has 逐字段
                      相等）；上游 SSE 顶层 provider_metadata 原样回传客户端（流式注入下一帧顶层、
                      非流式附到响应 JSON）；chat→anthropic 翻译路径上 providerOptions 被丢弃
+  21. free-builtin    免费内置供应商"有 key 才上车"：无 key 不注册；有 key + <KEY>_BASE_URL 指向
+                     假上游 → 装载期在线发现模型目录、/providers 与 /models 出现、chat 开箱即用
 """
 import json
 import os
@@ -310,8 +312,14 @@ def start_fake(port):
     return server
 
 
+FREE_BUILTIN_KEYS = ("GROQ_API_KEY", "GITHUB_MODELS_TOKEN", "GEMINI_API_KEY", "HUNYUAN_API_KEY", "ZHIPU_API_KEY")
+
+
 def gateway_env(port, workdir, providers_file="providers.json", extra=None):
     env = dict(os.environ)
+    # 确定性：新免费内置供应商"有 key 才上车"——除非场景显式注入，一律从继承环境里剥离
+    for key in FREE_BUILTIN_KEYS:
+        env.pop(key, None)
     env.update({
         "AUTO_COMPAT_GATEWAY_HOST": "127.0.0.1",
         "AUTO_COMPAT_GATEWAY_PORT": str(port),
@@ -847,7 +855,7 @@ def main():
         )
         elapsed = time.time() - started
         check("probe 退出码 0", proc.returncode == 0, f"rc={proc.returncode} out={(proc.stdout + proc.stderr)[-300:]}")
-        check("命中即停（<60s；旧行为要轮询 7 个真实预设端点，远超此限）", elapsed < 60, f"elapsed={elapsed:.1f}s")
+        check("命中即停（<60s；旧行为要轮询 9 个真实预设端点，远超此限）", elapsed < 60, f"elapsed={elapsed:.1f}s")
         with open(out_path) as fh:
             frozen = json.load(fh)
         check("两个 --url 解析到同一端点 → 只固化 1 条 custom-1（/v1）",
@@ -1687,6 +1695,54 @@ def main():
         stop(gw)
         fake.shutdown()
     results["cline-compat"] = len(FAILURES) == 0
+
+    # ---------------- 场景 21：免费内置供应商"有 key 才上车" ----------------
+    print("场景 21: 免费内置供应商——无 key 不注册；有 key + _BASE_URL 指向假上游 → 开箱即用")
+    workdir = scenario("free-builtin", "openai-only")
+    fake_port = free_port()
+    gw_port = free_port()
+    write_providers(workdir, [])  # providers.json 为空： groq 完全来自内置注册
+    fake = start_fake(fake_port)
+
+    # 21a：不设 key → /providers 不含 groq（回归：现有 e2e 环境已剥离这些 key）
+    gw = start_gateway(gw_port, workdir)
+    try:
+        with urllib.request.urlopen(f"http://127.0.0.1:{gw_port}/providers", timeout=5) as resp:
+            providers_off = [p.get("id") for p in json.loads(resp.read().decode()).get("data", [])]
+        check("21a 无 key：内置免费供应商不注册（/providers 不含 groq）",
+              "groq" not in providers_off and "intern-ai" in providers_off, f"providers={providers_off}")
+    finally:
+        stop(gw)
+
+    # 21b：设 GROQ_API_KEY + GROQ_API_KEY_BASE_URL → 注册 + 目录在线发现 + chat 可用
+    clear_requests()
+    gw = start_gateway(gw_port, workdir, extra_env={
+        "GROQ_API_KEY": "fake-groq-key",
+        "GROQ_API_KEY_BASE_URL": f"http://127.0.0.1:{fake_port}/v1",
+    })
+    try:
+        with urllib.request.urlopen(f"http://127.0.0.1:{gw_port}/providers", timeout=5) as resp:
+            providers_on = [p.get("id") for p in json.loads(resp.read().decode()).get("data", [])]
+        check("21b 有 key：groq 出现在 /providers（且目录在线发现 detected）",
+              "groq" in providers_on, f"providers={providers_on}")
+        with urllib.request.urlopen(f"http://127.0.0.1:{gw_port}/models", timeout=5) as resp:
+            models = json.loads(resp.read().decode())
+        model_ids = [m.get("id") for m in models.get("data", [])]
+        check("21b /models 列出 groq/ 前缀模型（装载期在线发现，非静态兜底表）",
+              any(isinstance(mid, str) and mid.startswith("groq/") for mid in model_ids),
+              f"groq_models={[mid for mid in model_ids if isinstance(mid, str) and mid.startswith('groq/')]}")
+        status, body = post(gw_port, "/v1/chat/completions",
+                            {"model": "groq/fake-model", "stream": True, "max_tokens": 16,
+                             "messages": [{"role": "user", "content": "hi"}]})
+        check("21b chat 请求 groq/fake-model 200 且 [DONE] 完整（内置供应商开箱即用）",
+              status == 200 and "data: [DONE]" in body, f"status={status} body={body[:200]}")
+        upstream_posts = [b for (m, p, b) in STATE["requests"] if m == "POST" and p.endswith("chat/completions")]
+        check("21b 上游恰好收到一次 chat 调用（_BASE_URL 覆盖生效）",
+              len(upstream_posts) == 1, f"posts={len(upstream_posts)}")
+    finally:
+        stop(gw)
+        fake.shutdown()
+    results["free-builtin"] = len(FAILURES) == 0
 
     print()
     if FAILURES:

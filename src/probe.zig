@@ -27,6 +27,8 @@ pub const PRESETS = [_]Preset{
     .{ .id = "modelscope", .display_name = "ModelScope 魔搭推理", .base_url = "https://api-inference.modelscope.cn/v1" },
     .{ .id = "volcengine-ark", .display_name = "火山方舟", .base_url = "https://ark.cn-beijing.volces.com/api/v3" },
     .{ .id = "zhipu", .display_name = "智谱 BigModel", .base_url = "https://open.bigmodel.cn/api/paas/v4" },
+    .{ .id = "mistral", .display_name = "Mistral La Plateforme", .base_url = "https://api.mistral.ai/v1" },
+    .{ .id = "dashscope-bailian", .display_name = "Alibaba Bailian (90-day trial quota)", .base_url = "https://dashscope.aliyuncs.com/compatible-mode/v1" },
 };
 
 pub fn findPreset(id: []const u8) ?*const Preset {
@@ -100,7 +102,7 @@ fn requestOnce(
 pub const api_path_candidates = [_][]const u8{
     "",    "/v1",       "/v2",       "/v3",       "/v4",       "/api",  "/api/v1",
     "/api/v2", "/api/v3", "/api/v4", "/v1/openai", "/openai/v1", "/compatibility/v1",
-    "/paas/v4", "/hf/v1", "/inference/v1",
+    "/paas/v4", "/v1beta/openai", "/inference", "/hf/v1", "/inference/v1",
 };
 
 const PathProbeVerdict = enum { list, auth_wall, miss };
@@ -671,6 +673,30 @@ fn relabelToNamedCandidate(named: []const Candidate, resolved_base: []const u8) 
         if (providers_mod.sameEndpoint(candidate.base_url, resolved_base)) return candidate;
     }
     return null;
+}
+
+test "PRESETS: 新免费预设（mistral / dashscope-bailian）与探测后缀" {
+    var saw_mistral = false;
+    var saw_bailian = false;
+    for (&PRESETS) |*preset| {
+        if (std.mem.eql(u8, preset.id, "mistral")) {
+            saw_mistral = true;
+            try std.testing.expectEqualStrings("https://api.mistral.ai/v1", preset.base_url);
+        }
+        if (std.mem.eql(u8, preset.id, "dashscope-bailian")) {
+            saw_bailian = true;
+            try std.testing.expectEqualStrings("https://dashscope.aliyuncs.com/compatible-mode/v1", preset.base_url);
+        }
+    }
+    try std.testing.expect(saw_mistral and saw_bailian);
+    // gemini 兼容层与 github-models /inference 后缀必须在探测候选里
+    var saw_v1beta = false;
+    var saw_inference = false;
+    for (api_path_candidates) |candidate| {
+        if (std.mem.eql(u8, candidate, "/v1beta/openai")) saw_v1beta = true;
+        if (std.mem.eql(u8, candidate, "/inference")) saw_inference = true;
+    }
+    try std.testing.expect(saw_v1beta and saw_inference);
 }
 
 test "relabelToNamedCandidate: 用户 URL 命中带 preset 的端点则按该名字固化" {

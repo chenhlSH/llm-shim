@@ -1,6 +1,6 @@
 # llm-shim
 
-A local LLM API compatibility gateway + connectivity probe in a **single binary** (Zig 0.17, standard library only, zero third-party dependencies).
+A local LLM API compatibility gateway + connectivity probe in a **single binary** (Zig 0.17.1, standard library only, zero third-party dependencies).
 
 > 中文文档：[README.zh.md](README.zh.md)（架构与规则） · [使用文档.md](使用文档.md)（上手指南） · [NOTES.zh.md](NOTES.zh.md)（工程笔记）
 
@@ -45,7 +45,10 @@ tar xzf llm-shim-v<version>-linux-x86_64.tar.gz   # linux (x86_64)
 tar xzf llm-shim-v<version>-macos-aarch64.tar.gz  # macos (Apple Silicon)
 unzip llm-shim-v<version>-windows-x86_64.zip      # windows (x86_64)
 
-# 2. export your vendor keys (built-ins: InternAI Discovery, AMD Radeon Cloud)
+# 2. export vendor keys — built-ins: InternAI Discovery, AMD Radeon Cloud
+#    free built-ins (registered only when their key is set): GROQ_API_KEY,
+#    GITHUB_MODELS_TOKEN, GEMINI_API_KEY, HUNYUAN_API_KEY, ZHIPU_API_KEY
+#    (<KEY>_BASE_URL points a built-in at a self-hosted proxy)
 export INTERN_AI_API_KEY=sk-...
 
 # 3. run the gateway (menu) or as a service
